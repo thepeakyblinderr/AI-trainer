@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FORM.AI — Virtual Gym Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --green:  #00ff88;
+  --red:    #ff3355;
+  --amber:  #ffaa00;
+  --bg:     #040608;
+  --panel:  rgba(4, 7, 11, 0.88);
+  --border: rgba(0, 255, 136, 0.18);
+}
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--green); }
+body { display: flex; flex-direction: column; font-family: 'Share Tech Mono', monospace; }
+
+/* ── TOP BAR ─────────────────────────────────── */
+#topbar {
+height: 52px;
+background: var(–panel);
+border-bottom: 1px solid var(–border);
+display: flex;
+align-items: center;
+padding: 0 18px;
+gap: 14px;
+flex-shrink: 0;
+z-index: 10;
+backdrop-filter: blur(10px);
+}
+.logo {
+font-family: ‘Orbitron’, monospace;
+font-weight: 900;
+font-size: 1.1rem;
+letter-spacing: 6px;
+white-space: nowrap;
+}
+.logo .dot { color: var(–red); }
+
+.status {
+display: flex;
+align-items: center;
+gap: 7px;
+font-size: 0.6rem;
+letter-spacing: 3px;
+color: #3a3a3a;
+white-space: nowrap;
+}
+.live-dot {
+width: 7px; height: 7px;
+border-radius: 50%;
+background: #1a1a1a;
+flex-shrink: 0;
+transition: background 0.3s, box-shadow 0.3s;
+}
+.live-dot.on        { background: var(–green); box-shadow: 0 0 7px var(–green); animation: blink 1.6s ease-in-out infinite; }
+.live-dot.analyzing { background: var(–amber); box-shadow: 0 0 7px var(–amber); animation: blink 0.8s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.25} }
+
+.vdiv { width: 1px; height: 22px; background: #151515; flex-shrink: 0; }
+
+.ex-group { display: flex; gap: 5px; }
+.ex-btn {
+background: none;
+border: 1px solid #1c1c1c;
+color: #383838;
+padding: 4px 11px;
+font-family: ‘Share Tech Mono’, monospace;
+font-size: 0.6rem;
+letter-spacing: 2px;
+cursor: pointer;
+transition: all 0.15s;
+white-space: nowrap;
+}
+.ex-btn:hover { color: #777; border-color: #333; }
+.ex-btn.on    { color: var(–green); border-color: var(–green); background: rgba(0,255,136,0.07); }
+
+.ml-auto { margin-left: auto; display: flex; gap: 6px; }
+
+.ctrl-btn {
+background: none;
+border: 1px solid #1c1c1c;
+color: #383838;
+padding: 4px 11px;
+font-family: ‘Share Tech Mono’, monospace;
+font-size: 0.6rem;
+letter-spacing: 2px;
+cursor: pointer;
+transition: all 0.15s;
+white-space: nowrap;
+}
+.ctrl-btn:hover  { color: #777; border-color: #333; }
+.ctrl-btn.voice  { color: var(–amber); border-color: rgba(255,170,0,0.4); }
+.ctrl-btn.muted  { color: #383838; border-color: #1c1c1c; }
+.ctrl-btn.danger:hover { color: var(–red); border-color: rgba(255,51,85,0.4); }
+
+/* ── MAIN ────────────────────────────────────── */
+#main {
+flex: 1;
+position: relative;
+overflow: hidden;
+min-height: 0;
+}
+
+#video {
+position: absolute;
+inset: 0;
+width: 100%;
+height: 100%;
+object-fit: cover;
+transform: scaleX(-1);
+}
+
+#canvas {
+position: absolute;
+inset: 0;
+width: 100%;
+height: 100%;
+pointer-events: none;
+}
+
+/* Scanlines */
+#main::after {
+content: ‘’;
+position: absolute;
+inset: 0;
+background: repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,0.05) 2px, rgba(0,0,0,0.05) 4px);
+pointer-events: none;
+z-index: 3;
+}
+
+/* Corner brackets */
+.br { position: absolute; width: 28px; height: 28px; z-index: 4; pointer-events: none; }
+.br-tl { top: 10px; left: 10px;   border-top: 2px solid var(–green); border-left:  2px solid var(–green); }
+.br-tr { top: 10px; right: 10px;  border-top: 2px solid var(–green); border-right: 2px solid var(–green); }
+.br-bl { bottom: 10px; left: 10px;  border-bottom: 2px solid var(–green); border-left:  2px solid var(–green); }
+.br-br { bottom: 10px; right: 10px; border-bottom: 2px solid var(–green); border-right: 2px solid var(–green); }
+
+/* ── HUD PANELS ──────────────────────────────── */
+#hud-right {
+position: absolute;
+right: 14px;
+top: 50%;
+transform: translateY(-50%);
+z-index: 5;
+display: flex;
+flex-direction: column;
+gap: 7px;
+}
+.card {
+background: var(–panel);
+border: 1px solid var(–border);
+padding: 7px 12px;
+min-width: 110px;
+backdrop-filter: blur(8px);
+}
+.card-label { font-size: 0.52rem; letter-spacing: 3px; color: #2e2e2e; margin-bottom: 1px; }
+.card-val {
+font-size: 1.4rem;
+line-height: 1;
+color: var(–green);
+transition: color 0.25s;
+}
+.card-val.reps        { font-family: ‘Bebas Neue’, cursive; font-size: 3rem; }
+.card-val.form-grade  { font-family: ‘Bebas Neue’, cursive; font-size: 3.2rem; }
+.card-val.warn { color: var(–amber); }
+.card-val.bad  { color: var(–red); }
+.card-val.grade-A  { color: var(–green); }
+.card-val.grade-B  { color: #aaff00; }
+.card-val.grade-C  { color: var(–amber); }
+.card-val.grade-F  { color: var(–red); }
+
+/* ── START OVERLAY ───────────────────────────── */
+#start-overlay {
+position: absolute;
+inset: 0;
+background: rgba(2, 5, 9, 0.95);
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+gap: 14px;
+z-index: 20;
+}
+.start-title {
+font-family: ‘Orbitron’, monospace;
+font-weight: 900;
+font-size: clamp(2.2rem, 7vw, 5rem);
+letter-spacing: 10px;
+color: var(–green);
+text-shadow: 0 0 50px rgba(0,255,136,0.25);
+}
+.start-title .dot { color: var(–red); }
+.start-sub {
+font-size: clamp(0.5rem, 1.2vw, 0.7rem);
+letter-spacing: 4px;
+color: #282828;
+}
+.start-features {
+display: flex;
+gap: 10px;
+margin: 6px 0;
+flex-wrap: wrap;
+justify-content: center;
+}
+.feat {
+border: 1px solid #141414;
+padding: 8px 16px;
+font-size: 0.58rem;
+letter-spacing: 2px;
+color: #242424;
+text-align: center;
+min-width: 110px;
+}
+.feat span { display: block; color: var(–green); font-size: 0.75rem; margin-bottom: 4px; letter-spacing: 1px; }
+.start-cta {
+margin-top: 10px;
+background: none;
+border: 2px solid var(–green);
+color: var(–green);
+padding: 11px 38px;
+font-family: ‘Orbitron’, monospace;
+font-size: 0.75rem;
+font-weight: 700;
+letter-spacing: 5px;
+cursor: pointer;
+transition: all 0.2s;
+}
+.start-cta:hover { background: rgba(0,255,136,0.08); box-shadow: 0 0 30px rgba(0,255,136,0.15); }
+
+/* ── LOADING ─────────────────────────────────── */
+#loading-msg {
+position: absolute;
+inset: 0;
+display: none;
+align-items: center;
+justify-content: center;
+z-index: 15;
+background: rgba(2,5,9,0.92);
+flex-direction: column;
+gap: 10px;
+}
+.ld-spinner {
+width: 32px; height: 32px;
+border: 2px solid #111;
+border-top-color: var(–green);
+border-radius: 50%;
+animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.ld-text { font-size: 0.62rem; letter-spacing: 4px; color: #333; }
+.ld-sub  { font-size: 0.52rem; letter-spacing: 3px; color: #1a1a1a; }
+
+/* ── FEEDBACK BAR ────────────────────────────── */
+#feedback-bar {
+height: 46px;
+background: var(–panel);
+border-top: 1px solid var(–border);
+display: flex;
+align-items: center;
+padding: 0 18px;
+gap: 10px;
+flex-shrink: 0;
+z-index: 10;
+}
+.fb-icon { font-size: 0.95rem; width: 22px; text-align: center; }
+.fb-text {
+font-size: 0.72rem;
+letter-spacing: 1.5px;
+flex: 1;
+color: #333;
+transition: color 0.3s;
+}
+.fb-text.good { color: var(–green); }
+.fb-text.warn { color: var(–amber); }
+.fb-text.bad  { color: var(–red); }
+</style>
+
+</head>
+<body>
+
+<!-- TOP BAR -->
+
+<div id="topbar">
+  <div class="logo">FORM<span class="dot">.</span>AI</div>
+  <div class="status">
+    <div class="live-dot" id="live-dot"></div>
+    <span id="status-txt">STANDBY</span>
+  </div>
+  <div class="vdiv"></div>
+  <div class="ex-group">
+    <button class="ex-btn on"  onclick="selectEx(this,'squat')">SQUAT</button>
+    <button class="ex-btn"     onclick="selectEx(this,'pushup')">PUSH-UP</button>
+    <button class="ex-btn"     onclick="selectEx(this,'curl')">BICEP CURL</button>
+  </div>
+  <div class="ml-auto">
+    <button class="ctrl-btn danger" onclick="resetReps()">↺ RESET</button>
+    <button class="ctrl-btn voice" id="voice-btn" onclick="toggleVoice()">🔊 VOICE</button>
+  </div>
+</div>
+
+<!-- MAIN CAMERA AREA -->
+
+<div id="main">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <div class="br br-tl"></div>
+  <div class="br br-tr"></div>
+  <div class="br br-bl"></div>
+  <div class="br br-br"></div>
+
+  <!-- Right HUD -->
+
+  <div id="hud-right">
+    <div class="card">
+      <div class="card-label">REPS</div>
+      <div class="card-val reps" id="h-reps">0</div>
+    </div>
+    <div class="card">
+      <div class="card-label" id="lbl-a1">KNEE ANGLE</div>
+      <div class="card-val" id="h-a1">---°</div>
+    </div>
+    <div class="card" id="card-a2">
+      <div class="card-label" id="lbl-a2">BACK LEAN</div>
+      <div class="card-val" id="h-a2">---°</div>
+    </div>
+    <div class="card">
+      <div class="card-label">FORM</div>
+      <div class="card-val form-grade grade-A" id="h-grade">-</div>
+    </div>
+  </div>
+
+  <!-- Start overlay -->
+
+  <div id="start-overlay">
+    <div class="start-title">FORM<span class="dot">.</span>AI</div>
+    <div class="start-sub">REAL-TIME POSE ANALYSIS · INSTANT VOICE COACHING</div>
+    <div class="start-features">
+      <div class="feat"><span>SQUAT</span>Knee · Hip · Back lean</div>
+      <div class="feat"><span>PUSH-UP</span>Elbow · Body alignment</div>
+      <div class="feat"><span>BICEP CURL</span>Elbow · Elbow stability</div>
+    </div>
+    <button class="start-cta" onclick="boot()">▶ ACTIVATE CAMERA</button>
+  </div>
+
+  <!-- Loading -->
+
+  <div id="loading-msg">
+    <div class="ld-spinner"></div>
+    <div class="ld-text" id="ld-main">LOADING POSE MODEL</div>
+    <div class="ld-sub">DOWNLOADING ~6MB · ONE-TIME ONLY</div>
+  </div>
+</div>
+
+<!-- FEEDBACK BAR -->
+
+<div id="feedback-bar">
+  <span class="fb-icon" id="fb-icon">💤</span>
+  <span class="fb-text" id="fb-text">AWAITING CAMERA ACTIVATION</span>
+</div>
+
+<script>
+// ═════════════════════════════════════════════════════════
+// GLOBAL STATE
+// ═════════════════════════════════════════════════════════
+let exercise   = 'squat';
+let voiceOn    = true;
+let lastMsg    = '';
+let lastMsgAt  = 0;
+let lmCache    = [];   // latest landmark array
+
+const repState = {
+  squat:  { reps: 0, phase: 'up'   },
+  pushup: { reps: 0, phase: 'up'   },
+  curl:   { reps: 0, phase: 'down' }
+};
+
+const video  = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+// ═════════════════════════════════════════════════════════
+// GEOMETRY
+// ═════════════════════════════════════════════════════════
+
+/** Angle (degrees) at vertex B formed by A-B-C */
+function calcAngle(A, B, C) {
+  const r = Math.atan2(C.y - B.y, C.x - B.x) - Math.atan2(A.y - B.y, A.x - B.x);
+  let d = Math.abs(r * 180 / Math.PI);
+  return d > 180 ? 360 - d : d;
+}
+
+/** Average of two landmarks */
+function mid(a, b) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+    visibility: Math.min(a.visibility ?? 0, b.visibility ?? 0)
+  };
+}
+
+/** Is a landmark reliably detected? */
+function ok(p, t = 0.4) { return p && (p.visibility ?? 1) > t; }
+
+/**
+ * Convert 0-1 normalised landmark to canvas pixels.
+ * X is flipped to match the CSS-mirrored video feed.
+ */
+function px(lm) {
+  return { x: (1 - lm.x) * canvas.width, y: lm.y * canvas.height };
+}
+
+// ═════════════════════════════════════════════════════════
+// EXERCISE ANALYZERS
+// ═════════════════════════════════════════════════════════
+
+// ── SQUAT ────────────────────────────────────────────────
+function analyzeSquat(lm) {
+  const LH = lm[23], RH = lm[24];
+  const LK = lm[25], RK = lm[26];
+  const LA = lm[27], RA = lm[28];
+  const LS = lm[11], RS = lm[12];
+
+  if (!ok(LH) && !ok(RH)) {
+    return { valid: false, msg: 'STEP BACK — FULL BODY MUST BE VISIBLE', grade: '?' };
+  }
+
+  const hipM    = mid(LH, RH);
+  const kneeM   = mid(LK, RK);
+  const ankleM  = mid(LA, RA);
+  const shldrM  = mid(LS, RS);
+
+  const kneeAng  = calcAngle(hipM, kneeM, ankleM);
+  const vertUp   = { x: hipM.x, y: hipM.y - 0.5 };   // point above hip
+  const backAng  = calcAngle(vertUp, hipM, shldrM);    // lean from vertical
+
+  // Knee cave: knees narrower than ankles
+  const kW       = Math.abs(LK.x - RK.x);
+  const aW       = Math.abs(LA.x - RA.x);
+  const kneeCave = ok(LK) && ok(LA) && kW < aW * 0.75;
+
+  // Good depth: hip crease at or below knee
+  const goodDepth = hipM.y >= kneeM.y - 0.02;
+
+  // Rep count: angle crosses threshold
+  const s = repState.squat;
+  if (kneeAng < 108 && s.phase === 'up')   s.phase = 'down';
+  if (kneeAng > 162 && s.phase === 'down') { s.phase = 'up'; s.reps++; trySpeak('rep ' + s.reps); }
+
+  // Build issues list
+  const issues = [];
+  let grade = 'A';
+
+  if (kneeAng < 108) {
+    // In-squat checks
+    if (backAng > 52) {
+      issues.push({ msg: "CHEST UP — BACK IS ROUNDING", sev: 'bad' });
+      grade = 'C';
+    }
+    if (kneeCave) {
+      issues.push({ msg: "PUSH KNEES OUT — THEY'RE CAVING IN", sev: 'bad' });
+      if (grade === 'A') grade = 'B';
+    }
+    if (!goodDepth && kneeAng > 82) {
+      issues.push({ msg: "GO DEEPER — HIP CREASE BELOW KNEE", sev: 'warn' });
+      if (grade === 'A') grade = 'B';
+    }
+    if (!issues.length) {
+      issues.push({ msg: "PERFECT FORM — SOLID DEPTH!", sev: 'good' });
+    }
+  } else if (kneeAng < 158) {
+    issues.push({ msg: "DESCENDING — BRACE CORE, CHEST UP", sev: 'warn' });
+    grade = 'B';
+  } else {
+    issues.push({ msg: "STANDING — BEGIN YOUR SQUAT", sev: 'good' });
+    grade = 'A';
+  }
+
+  return { valid: true, kneeAng: Math.round(kneeAng), auxAng: Math.round(backAng), issues, grade, reps: s.reps };
+}
+
+// ── PUSH-UP ──────────────────────────────────────────────
+function analyzePushup(lm) {
+  const LS = lm[11], RS = lm[12];
+  const LE = lm[13], RE = lm[14];
+  const LW = lm[15], RW = lm[16];
+  const LH = lm[23], RH = lm[24];
+  const LA = lm[27], RA = lm[28];
+
+  const leftVis  = (LS?.visibility ?? 0) + (LE?.visibility ?? 0);
+  const rightVis = (RS?.visibility ?? 0) + (RE?.visibility ?? 0);
+  const [S, E, W, H, A] = leftVis >= rightVis
+    ? [LS, LE, LW, LH, LA]
+    : [RS, RE, RW, RH, RA];
+
+  if (!ok(S) || !ok(E) || !ok(W)) {
+    return { valid: false, msg: 'POSITION SIDEWAYS TO THE CAMERA', grade: '?' };
+  }
+
+  const elbowAng = calcAngle(S, E, W);
+  let bodyDev = 0;
+  if (ok(H) && ok(A)) bodyDev = Math.abs(180 - calcAngle(S, H, A));
+
+  const hipSag  = ok(H) && ok(A) && H.y > Math.max(S.y, A.y) + 0.04;
+  const hipPike = ok(H) && ok(A) && H.y < Math.min(S.y, A.y) - 0.06;
+
+  const s = repState.pushup;
+  if (elbowAng < 98  && s.phase === 'up')   s.phase = 'down';
+  if (elbowAng > 152 && s.phase === 'down') { s.phase = 'up'; s.reps++; trySpeak('rep ' + s.reps); }
+
+  const issues = [];
+  let grade = 'A';
+
+  if (hipSag) {
+    issues.push({ msg: "ENGAGE CORE — HIPS ARE SAGGING", sev: 'bad' });
+    grade = 'C';
+  }
+  if (hipPike) {
+    issues.push({ msg: "LOWER YOUR HIPS — BODY MUST BE STRAIGHT", sev: 'warn' });
+    if (grade === 'A') grade = 'B';
+  }
+  if (!issues.length) {
+    if (elbowAng < 98)  issues.push({ msg: "FULL DEPTH — DRIVE BACK UP!", sev: 'good' });
+    else if (elbowAng < 145) issues.push({ msg: "GOING DOWN — CONTROLLED TEMPO", sev: 'warn' });
+    else issues.push({ msg: "ARMS LOCKED — START NEXT REP", sev: 'good' });
+  }
+
+  return { valid: true, kneeAng: Math.round(elbowAng), auxAng: Math.round(bodyDev), issues, grade, reps: s.reps };
+}
+
+// ── BICEP CURL ───────────────────────────────────────────
+function analyzeCurl(lm) {
+  const [LS, RS, LE, RE, LW, RW] = [lm[11], lm[12], lm[13], lm[14], lm[15], lm[16]];
+
+  if (!ok(LS) && !ok(RS)) {
+    return { valid: false, msg: 'FACE THE CAMERA — ARMS MUST BE VISIBLE', grade: '?' };
+  }
+
+  const LA = (ok(LS) && ok(LE) && ok(LW)) ? calcAngle(LS, LE, LW) : 999;
+  const RA = (ok(RS) && ok(RE) && ok(RW)) ? calcAngle(RS, RE, RW) : 999;
+  const elbowAng = Math.min(LA, RA);
+
+  // Elbow drift: elbow x deviates from shoulder x
+  const lDrift = ok(LS) && ok(LE) && Math.abs(LE.x - LS.x) > 0.18;
+  const rDrift = ok(RS) && ok(RE) && Math.abs(RE.x - RS.x) > 0.18;
+
+  const s = repState.curl;
+  if (elbowAng < 55  && s.phase === 'down') s.phase = 'up';
+  if (elbowAng > 155 && s.phase === 'up')   { s.phase = 'down'; s.reps++; trySpeak('rep ' + s.reps); }
+
+  const issues = [];
+  let grade = 'A';
+
+  if (lDrift || rDrift) {
+    issues.push({ msg: "ELBOWS IN — DON'T SWING YOUR ARMS", sev: 'warn' });
+    grade = 'B';
+  }
+  if (!issues.length) {
+    if (elbowAng < 55)       issues.push({ msg: "PEAK CONTRACTION — SQUEEZE!", sev: 'good' });
+    else if (elbowAng < 130) issues.push({ msg: "CURLING — SLOW AND CONTROLLED", sev: 'warn' });
+    else                     issues.push({ msg: "FULL EXTENSION — GREAT RANGE", sev: 'good' });
+  }
+
+  return { valid: true, kneeAng: Math.round(elbowAng), auxAng: null, issues, grade, reps: s.reps };
+}
+
+// ═════════════════════════════════════════════════════════
+// SKELETON DRAWING
+// ═════════════════════════════════════════════════════════
+
+const BONES = [
+  [11,12],[11,13],[13,15],[12,14],[14,16],   // arms + shoulders
+  [11,23],[12,24],[23,24],                   // torso
+  [23,25],[25,27],[27,29],[27,31],            // left leg
+  [24,26],[26,28],[28,30],[28,32],            // right leg
+  [0,11],[0,12]                              // neck (approx)
+];
+const KEY_JOINTS = [0,11,12,13,14,15,16,23,24,25,26,27,28];
+
+function drawSkeleton(lm) {
+  // Bones
+  ctx.lineWidth = 2.5;
+  BONES.forEach(([i, j]) => {
+    if (!ok(lm[i], 0.3) || !ok(lm[j], 0.3)) return;
+    const a = px(lm[i]), b = px(lm[j]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.6)';
+    ctx.stroke();
+  });
+
+  // Highlight problem joints dynamically
+  const badJoints = new Set(getBadJoints());
+
+  // Joint dots
+  KEY_JOINTS.forEach(i => {
+    if (!ok(lm[i], 0.35)) return;
+    const { x, y } = px(lm[i]);
+    const isBad = badJoints.has(i);
+    ctx.beginPath();
+    ctx.arc(x, y, isBad ? 7 : 4.5, 0, Math.PI * 2);
+    ctx.fillStyle   = isBad ? 'rgba(255,51,85,0.85)' : 'rgba(255,51,85,0.7)';
+    ctx.fill();
+    ctx.strokeStyle = isBad ? '#ff3355' : 'rgba(0,255,136,0.8)';
+    ctx.lineWidth   = isBad ? 2 : 1.5;
+    ctx.stroke();
+  });
+}
+
+function getBadJoints() {
+  // Returns joint indices that are currently in a "bad" state for highlighting
+  if (!lmCache.length) return [];
+  const lm = lmCache;
+  if (exercise === 'squat') {
+    const LK = lm[25], RK = lm[26], LA = lm[27], RA = lm[28];
+    const kW = Math.abs((LK?.x||0) - (RK?.x||0));
+    const aW = Math.abs((LA?.x||0) - (RA?.x||0));
+    if (ok(LK) && ok(LA) && kW < aW * 0.75) return [25, 26];
+  }
+  return [];
+}
+
+function drawAngleTag(lmIndices, angleDeg, sev) {
+  if (!angleDeg || !lmCache.length) return;
+  const pts = lmIndices.map(i => lmCache[i]).filter(p => ok(p, 0.3));
+  if (!pts.length) return;
+
+  const cx = pts.reduce((s, p) => s + (1 - p.x) * canvas.width,  0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y       * canvas.height, 0) / pts.length - 18;
+
+  const color = sev === 'bad' ? '#ff3355' : sev === 'warn' ? '#ffaa00' : '#00ff88';
+  const label = angleDeg + '°';
+
+  ctx.font = 'bold 12px "Share Tech Mono", monospace';
+  ctx.textAlign = 'center';
+  const w = ctx.measureText(label).width + 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(cx - w / 2, cy - 14, w, 18);
+  ctx.fillStyle = color;
+  ctx.fillText(label, cx, cy);
+}
+
+// ═════════════════════════════════════════════════════════
+// MAIN FRAME HANDLER
+// ═════════════════════════════════════════════════════════
+
+function onResults(results) {
+  // Resize canvas to match video resolution each frame
+  if (video.videoWidth)  canvas.width  = video.videoWidth;
+  if (video.videoHeight) canvas.height = video.videoHeight;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const dot = document.getElementById('live-dot');
+  const stx = document.getElementById('status-txt');
+
+  if (!results.poseLandmarks) {
+    dot.className = 'live-dot on';
+    stx.textContent = 'NO POSE';
+    setFeedback('NO POSE DETECTED — STEP INTO FRAME FULLY', 'warn', '👁️');
+    return;
+  }
+
+  lmCache = results.poseLandmarks;
+  dot.className = 'live-dot analyzing';
+  stx.textContent = 'ANALYZING';
+
+  drawSkeleton(lmCache);
+
+  let result;
+  if      (exercise === 'squat')  result = analyzeSquat(lmCache);
+  else if (exercise === 'pushup') result = analyzePushup(lmCache);
+  else                            result = analyzeCurl(lmCache);
+
+  if (!result.valid) {
+    setFeedback(result.msg, 'warn', '👁️');
+    return;
+  }
+
+  // Draw angle labels near relevant joints
+  if (exercise === 'squat') {
+    const sev = result.kneeAng < 85 ? 'bad' : result.kneeAng < 120 ? 'warn' : 'good';
+    drawAngleTag([25, 26], result.kneeAng, sev);
+    drawAngleTag([23, 24], result.auxAng,  result.auxAng > 50 ? 'bad' : 'good');
+  } else if (exercise === 'pushup') {
+    const elbowIdx = (lmCache[13]?.visibility ?? 0) >= (lmCache[14]?.visibility ?? 0) ? [13] : [14];
+    drawAngleTag(elbowIdx, result.kneeAng, result.kneeAng < 60 ? 'good' : 'warn');
+  } else {
+    drawAngleTag([13, 14], result.kneeAng, result.kneeAng < 60 ? 'good' : 'warn');
+  }
+
+  updateHUD(result);
+}
+
+// ═════════════════════════════════════════════════════════
+// HUD & FEEDBACK
+// ═════════════════════════════════════════════════════════
+
+function updateHUD(result) {
+  document.getElementById('h-reps').textContent = result.reps ?? 0;
+
+  // Angle 1
+  const a1el = document.getElementById('h-a1');
+  a1el.textContent = result.kneeAng ? result.kneeAng + '°' : '---°';
+  a1el.className = 'card-val ' + getAngleClass(result.kneeAng, exercise);
+
+  // Angle 2
+  const card2 = document.getElementById('card-a2');
+  if (result.auxAng !== null && result.auxAng !== undefined) {
+    card2.style.display = '';
+    const a2el = document.getElementById('h-a2');
+    a2el.textContent = result.auxAng + '°';
+    a2el.className = 'card-val ' + (result.auxAng > 45 ? 'bad' : result.auxAng > 25 ? 'warn' : '');
+  } else {
+    card2.style.display = 'none';
+  }
+
+  // Form grade
+  const gradeEl = document.getElementById('h-grade');
+  gradeEl.textContent = result.grade || '-';
+  gradeEl.className = 'card-val form-grade grade-' + (result.grade || 'A');
+
+  // Feedback
+  if (result.issues?.length) {
+    const top = result.issues[0];
+    setFeedback(top.msg, top.sev, top.sev === 'bad' ? '⚠️' : top.sev === 'warn' ? '🔶' : '✅');
+    if (top.sev === 'bad' || (top.sev === 'warn' && result.reps > 0)) {
+      trySpeak(top.msg);
+    }
+  }
+}
+
+function getAngleClass(ang, ex) {
+  if (!ang) return '';
+  if (ex === 'squat')  return ang < 85 ? 'bad' : ang < 120 ? 'warn' : '';
+  if (ex === 'pushup') return '';   // varies too much by phase
+  if (ex === 'curl')   return ang < 55 ? '' : ang > 155 ? '' : 'warn';
+  return '';
+}
+
+function setFeedback(msg, cls, icon) {
+  document.getElementById('fb-text').textContent = msg;
+  document.getElementById('fb-text').className = 'fb-text ' + (cls || '');
+  document.getElementById('fb-icon').textContent = icon || '●';
+}
+
+// ═════════════════════════════════════════════════════════
+// VOICE
+// ═════════════════════════════════════════════════════════
+
+function trySpeak(text) {
+  if (!voiceOn) return;
+  const now = Date.now();
+  if (text === lastMsg && now - lastMsgAt < 4500) return;
+  lastMsg   = text;
+  lastMsgAt = now;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.toLowerCase().replace(/[!]/g, ''));
+  u.rate = 1.05; u.pitch = 0.92; u.volume = 1;
+  window.speechSynthesis.speak(u);
+}
+
+// ═════════════════════════════════════════════════════════
+// CONTROLS
+// ═════════════════════════════════════════════════════════
+
+function selectEx(btn, ex) {
+  exercise = ex;
+  document.querySelectorAll('.ex-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+
+  const labels = {
+    squat:  ['KNEE ANGLE', 'BACK LEAN'],
+    pushup: ['ELBOW ANGLE', 'BODY ALIGN°'],
+    curl:   ['ELBOW ANGLE', '']
+  };
+  document.getElementById('lbl-a1').textContent = labels[ex][0];
+  document.getElementById('lbl-a2').textContent = labels[ex][1];
+  document.getElementById('h-reps').textContent = repState[ex].reps;
+  document.getElementById('h-grade').textContent = '-';
+  document.getElementById('h-grade').className = 'card-val form-grade grade-A';
+  lastMsg = '';
+
+  const names = { squat: 'SQUAT', pushup: 'PUSH-UP', curl: 'BICEP CURL' };
+  setFeedback(names[ex] + ' MODE ACTIVE — BEGIN WHEN READY', 'good', '💪');
+  trySpeak(ex.replace('-', ' ') + ' mode. Let\'s go.');
+}
+
+function toggleVoice() {
+  voiceOn = !voiceOn;
+  const btn = document.getElementById('voice-btn');
+  btn.textContent = voiceOn ? '🔊 VOICE' : '🔇 MUTED';
+  btn.className = 'ctrl-btn ' + (voiceOn ? 'voice' : 'muted');
+  if (!voiceOn) window.speechSynthesis.cancel();
+}
+
+function resetReps() {
+  repState[exercise].reps  = 0;
+  repState[exercise].phase = exercise === 'curl' ? 'down' : 'up';
+  document.getElementById('h-reps').textContent = '0';
+  setFeedback('REPS RESET — READY TO BEGIN', 'good', '↺');
+}
+
+// ═════════════════════════════════════════════════════════
+// BOOT
+// ═════════════════════════════════════════════════════════
+
+async function boot() {
+  document.getElementById('start-overlay').style.display = 'none';
+  const ld = document.getElementById('loading-msg');
+  ld.style.display = 'flex';
+  setFeedback('LOADING AI POSE MODEL...', 'warn', '⏳');
+
+  const pose = new Pose({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+  });
+
+  pose.setOptions({
+    modelComplexity:       1,
+    smoothLandmarks:       true,
+    enableSegmentation:    false,
+    smoothSegmentation:    false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence:  0.5
+  });
+
+  pose.onResults(onResults);
+
+  const cam = new Camera(video, {
+    onFrame: async () => { await pose.send({ image: video }); },
+    width: 1280, height: 720
+  });
+
+  try {
+    await cam.start();
+    ld.style.display = 'none';
+    document.getElementById('live-dot').className  = 'live-dot on';
+    document.getElementById('status-txt').textContent = 'LIVE';
+    setFeedback('CAMERA ACTIVE · SELECT EXERCISE AND BEGIN', 'good', '🎯');
+    trySpeak('Camera activated. Ready to analyze your form.');
+  } catch (e) {
+    document.getElementById('ld-main').textContent = 'CAMERA ERROR — ' + e.message;
+    setFeedback('CAMERA PERMISSION DENIED — CHECK BROWSER SETTINGS', 'bad', '❌');
+  }
+}
+</script>
+
+</body>
+</html>
