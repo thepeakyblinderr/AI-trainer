@@ -201,8 +201,32 @@ const WORKOUT = {
 };
 
 let currentEx='floor_press', voiceOn=true, lastMsg='', lastMsgAt=0, lmCache=[];
+
+// Exercises where resting position = "top" so we need to wait for a full DOWN first
+// before counting. Starting them at phase:'down' prevents false reps on load.
+const NEEDS_DOWN_START=new Set([
+  'db_curl','hammer_curl','hammer_curl2','conc_curl','incline_curl', // curls: arm extended at rest
+  'bent_row','single_row',          // rows: arm extended at rest
+  'lat_raise','front_raise','upright_row', // raises: arms at sides = "bottom"
+  'shrug',                          // shrug: shoulders dropped at rest
+  'tri_kick',                       // kickback: arm bent at rest
+  'renegade_row',                   // renegade: plank = arm extended
+]);
+function initPhase(id){ return NEEDS_DOWN_START.has(id)?'down':'up'; }
+
 const repState={};
-Object.values(WORKOUT).forEach(d=>d.exercises.forEach(e=>{repState[e.id]={reps:0,phase:'up'}}));
+Object.values(WORKOUT).forEach(d=>d.exercises.forEach(e=>{
+  repState[e.id]={reps:0,phase:initPhase(e.id),lastRepAt:0};
+}));
+
+// Debounced rep counter — min 700ms between reps prevents noise spikes
+function countRep(s){
+  const now=Date.now();
+  if(now-s.lastRepAt<700)return;
+  s.reps++; s.lastRepAt=now;
+  trySpeak('rep '+s.reps);
+}
+
 const video=document.getElementById('video'), canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
 
 // --- GEOMETRY ---
@@ -235,7 +259,7 @@ function analyzeSquat(lm,variant){
   const cave=ok(LK)&&ok(LA)&&kW<aW*0.72;
   const s=repState[currentEx];
   if(kneeAng<110&&s.phase==='up')s.phase='down';
-  if(kneeAng>160&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  if(kneeAng>160&&s.phase==='down'){s.phase='up';countRep(s)}
   const issues=[];let grade='A';
   const maxLean=variant==='goblet'?38:48;
   if(kneeAng<110){
@@ -260,7 +284,7 @@ function analyzePushup(lm){
   const pike=ok(H)&&ok(A)&&H.y<Math.min(S.y,A.y)-0.06;
   const s=repState[currentEx];
   if(ea<98&&s.phase==='up')s.phase='down';
-  if(ea>152&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea>152&&s.phase==='down'){s.phase='up';countRep(s)}
   const issues=[];let grade='A';
   if(sag){issues.push({msg:'ENGAGE CORE - HIPS SAGGING',sev:'bad'});grade='C'}
   if(pike){issues.push({msg:'LOWER HIPS - BODY STRAIGHT',sev:'warn'});if(grade==='A')grade='B'}
@@ -283,7 +307,7 @@ function analyzeCurl(lm){
   const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
   const s=repState[currentEx];
   if(ea<55&&s.phase==='down')s.phase='up';
-  if(ea>155&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea>155&&s.phase==='up'){s.phase='down';countRep(s)}
   const issues=[];let grade='A';
   if(lD||rD){issues.push({msg:"ELBOWS IN - DON'T SWING",sev:'warn'});grade='B'}
   if(!issues.length){
@@ -304,7 +328,7 @@ function analyzeHinge(lm,variant){
     if(ta<22){issues.push({msg:'HINGE MORE - NEED 45 DEG LEAN',sev:'warn'});if(grade==='A')grade='B'}
     if(ea!==null){
       if(ea<78&&s.phase==='down')s.phase='up';
-      if(ea>155&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+      if(ea>155&&s.phase==='up'){s.phase='down';countRep(s)}
       if(!issues.length){
         if(ea<78)issues.push({msg:'TOP OF ROW - SQUEEZE BACK!',sev:'good'})
         else if(ea<145)issues.push({msg:'ROW THE WEIGHT UP',sev:'warn'})
@@ -313,7 +337,7 @@ function analyzeHinge(lm,variant){
     }
   }else{
     if(ta>35&&s.phase==='up')s.phase='down';
-    if(ta<8&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+    if(ta<8&&s.phase==='down'){s.phase='up';countRep(s)}
     if(!issues.length){
       if(ta>35)issues.push({msg:'HINGED - DRIVE HIPS TO STAND',sev:'good'})
       else issues.push({msg:'STANDING TALL - HINGE FORWARD',sev:'good'})
@@ -328,7 +352,7 @@ function analyzeFloorPress(lm,cg){
   const ea=sa(S,E,W)??160;
   const s=repState[currentEx];
   if(ea<88&&s.phase==='up')s.phase='down';
-  if(ea>155&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea>155&&s.phase==='down'){s.phase='up';countRep(s)}
   const[LS,RS,LE,RE]=[lm[11],lm[12],lm[13],lm[14]];
   const issues=[];let grade='A';
   if(cg&&ok(LS)&&ok(RS)&&ok(LE)&&ok(RE)){
@@ -348,7 +372,7 @@ function analyzeTricepExt(lm,variant){
   const ea=sa(S,E,W)??160;
   const s=repState[currentEx];
   if(ea<60&&s.phase==='up')s.phase='down';
-  if(ea>155&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea>155&&s.phase==='down'){s.phase='up';countRep(s)}
   const[LS,RS,LE,RE]=[lm[11],lm[12],lm[13],lm[14]];
   let a2=null;
   if(variant==='ohd'&&ok(LS)&&ok(RS)&&ok(LE)&&ok(RE)){
@@ -370,7 +394,7 @@ function analyzeOHDPress(lm){
   const ea=sa(S,E,W)??160, back=torsoAngle(lm)??0;
   const s=repState[currentEx];
   if(ea<95&&s.phase==='up')s.phase='down';
-  if(ea>158&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea>158&&s.phase==='down'){s.phase='up';countRep(s)}
   const issues=[];let grade='A';
   if(back>22){issues.push({msg:'STOP ARCHING BACK - BRACE CORE',sev:'bad'});grade='C'}
   if(!issues.length){
@@ -389,7 +413,7 @@ function analyzeLunge(lm){
   const ka=Math.round(Math.min(laA,raA)), back=torsoAngle(lm)??0;
   const s=repState[currentEx];
   if(ka<100&&s.phase==='up')s.phase='down';
-  if(ka>155&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  if(ka>155&&s.phase==='down'){s.phase='up';countRep(s)}
   const issues=[];let grade='A';
   if(back>22){issues.push({msg:'CHEST UP - TORSO LEANING',sev:'warn'});grade='B'}
   if(!issues.length){
@@ -407,7 +431,7 @@ function analyzeLateralRaise(lm){
   const elev=Math.round(Math.max(lE,rE)*400);
   const s=repState[currentEx];
   if(elev>25&&s.phase==='down')s.phase='up';
-  if(elev<8&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  if(elev<8&&s.phase==='up'){s.phase='down';countRep(s)}
   const lA=sa(LS,LE,LW)??170, rA=sa(RS,RE,RW)??170;
   const issues=[];let grade='A';
   if(Math.min(lA,rA)<90){issues.push({msg:'SLIGHT BEND ONLY - NOT A ROW',sev:'warn'});grade='B'}
@@ -426,7 +450,7 @@ function analyzeFrontRaise(lm){
   const elev=Math.round(Math.max(0,S.y-(ok(W)?W.y:S.y))*400);
   const s=repState[currentEx];
   if(elev>30&&s.phase==='down')s.phase='up';
-  if(elev<8&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  if(elev<8&&s.phase==='up'){s.phase='down';countRep(s)}
   const issues=[];let grade='A';
   if(!issues.length){
     if(elev>50)issues.push({msg:'TOP - LOWER SLOWLY',sev:'good'})
@@ -443,7 +467,7 @@ function analyzeUprightRow(lm){
   const eh=Math.round(Math.max(lH,rH)*400);
   const s=repState[currentEx];
   if(eh>35&&s.phase==='down')s.phase='up';
-  if(eh<10&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  if(eh<10&&s.phase==='up'){s.phase='down';countRep(s)}
   const aboveWrist=(ok(LE)&&ok(LW))?LE.y<LW.y:((ok(RE)&&ok(RW))?RE.y<RW.y:true);
   const issues=[];let grade='A';
   if(!aboveWrist){issues.push({msg:'ELBOWS HIGHER THAN WRISTS',sev:'warn'});grade='B'}
@@ -460,15 +484,16 @@ function analyzeShrug(lm){
   if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - SHOULDERS VISIBLE',grade:'?'};
   const asym=Math.round(Math.abs(LS.y-RS.y)*400);
   const nose=lm[0], avgS=(LS.y+RS.y)/2;
-  const ed=ok(nose,.2)?Math.round(Math.abs(avgS-nose.y)*400):50;
+  const ed=ok(nose,.2)?Math.round(Math.abs(avgS-nose.y)*400):60;
   const s=repState[currentEx];
-  if(ed<30&&s.phase==='down')s.phase='up';
-  if(ed>55&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  // ed small = shoulders near nose = fully shrugged. Require clear shrug (ed<26) before counting return.
+  if(ed<26&&s.phase==='down')s.phase='up';
+  if(ed>62&&s.phase==='up'){s.phase='down';countRep(s)}
   const issues=[];let grade='A';
-  if(asym>15){issues.push({msg:'EVEN OUT - SHOULDERS UNEVEN',sev:'warn'});grade='B'}
+  if(asym>18){issues.push({msg:'EVEN OUT - SHOULDERS UNEVEN',sev:'warn'});grade='B'}
   if(!issues.length){
-    if(ed<30)issues.push({msg:'SHRUGGED - HOLD & SQUEEZE TRAPS!',sev:'good'})
-    else if(ed<50)issues.push({msg:'SHRUGGING - EARS TO SHOULDERS',sev:'warn'})
+    if(ed<26)issues.push({msg:'SHRUGGED - HOLD & SQUEEZE TRAPS!',sev:'good'})
+    else if(ed<50)issues.push({msg:'SHRUGGING UP - EARS TO SHOULDERS',sev:'warn'})
     else issues.push({msg:'RELAXED - SHRUG STRAIGHT UP',sev:'good'})
   }
   return{valid:true,a1:ed,a2:asym,issues,grade,reps:s.reps}
@@ -480,7 +505,7 @@ function analyzeTricepKickback(lm){
   const[S,E,W]=bestArm(lm);const ea=sa(S,E,W)??90;
   const s=repState[currentEx];
   if(ea>155&&s.phase==='down')s.phase='up';
-  if(ea<60&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea<60&&s.phase==='up'){s.phase='down';countRep(s)}
   const issues=[];let grade='A';
   if(ta<28){issues.push({msg:'LEAN MORE FORWARD - TORSO PARALLEL',sev:'warn'});grade='B'}
   if(!issues.length){
@@ -495,13 +520,12 @@ function analyzeCalfRaise(lm){
   const back=torsoAngle(lm)??0;
   const[LS,RS]=[lm[11],lm[12]];
   if(!ok(LS,.28)&&!ok(RS,.28))return{valid:false,msg:'STAND SIDEWAYS TO CAMERA',grade:'?'};
-  const s=repState[currentEx];
-  if(back>8&&s.phase==='up')s.phase='down';
-  if(back<3&&s.phase==='down'){s.phase='up';s.reps++;trySpeak('rep '+s.reps)}
+  // Calf raise: ankle extension isn't reliably tracked by MediaPipe.
+  // We only check posture quality; use the ↺ RESET button to count sets manually.
   const issues=[];let grade='A';
-  if(back>12){issues.push({msg:'STAND TALL - AVOID LEANING',sev:'warn'});grade='B'}
-  else issues.push({msg:'RISE ON TOES - FULL RANGE',sev:'good'})
-  return{valid:true,a1:back,a2:null,issues,grade,reps:s.reps}
+  if(back>12){issues.push({msg:'STAND TALL - AVOID LEANING FORWARD',sev:'warn'});grade='B'}
+  else issues.push({msg:'RISE ON TOES - FULL RANGE OF MOTION',sev:'good'})
+  return{valid:true,a1:back,a2:null,issues,grade,reps:repState[currentEx].reps}
 }
 
 function analyzeRenegadeRow(lm){
@@ -514,7 +538,7 @@ function analyzeRenegadeRow(lm){
   const pike=ok(H)&&ok(A)&&H.y<Math.min(S.y,A.y)-0.06;
   const s=repState[currentEx];
   if(ea<80&&s.phase==='down')s.phase='up';
-  if(ea>150&&s.phase==='up'){s.phase='down';s.reps++;trySpeak('rep '+s.reps)}
+  if(ea>150&&s.phase==='up'){s.phase='down';countRep(s)}
   const issues=[];let grade='A';
   if(sag){issues.push({msg:'CORE TIGHT - HIPS DROPPING',sev:'bad'});grade='C'}
   if(pike){issues.push({msg:'LOWER HIPS - STAY LEVEL',sev:'warn'});if(grade==='A')grade='B'}
@@ -708,7 +732,9 @@ function selectExById(id,btn){
 
 function resetReps(){
   if(!currentEx)return;
-  repState[currentEx].reps=0;repState[currentEx].phase='up';
+  repState[currentEx].reps=0;
+  repState[currentEx].phase=initPhase(currentEx);
+  repState[currentEx].lastRepAt=0;
   document.getElementById('h-reps').textContent='0';
   setFeedback('REPS RESET - READY TO BEGIN','good','↺');
 }
