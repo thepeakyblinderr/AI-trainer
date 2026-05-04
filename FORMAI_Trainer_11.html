@@ -456,28 +456,6 @@ function analyzeSquat(lm,variant){
   return{valid:true,a1:kneeAng,a2:a2,issues,grade,reps:s.reps}
 }
 
-function analyzePushup(lm){
-  const[LS,RS,LE,RE,LW,RW,LH,RH,LA,RA]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16],lm[23],lm[24],lm[27],lm[28]];
-  const lv=(LS?.visibility??0)+(LE?.visibility??0),rv=(RS?.visibility??0)+(RE?.visibility??0);
-  const[S,E,W,H,A]=lv>=rv?[LS,LE,LW,LH,LA]:[RS,RE,RW,RH,RA];
-  if(!ok(S)||!ok(E))return{valid:false,msg:'POSITION SIDEWAYS TO CAMERA',grade:'?'};
-  const ea=sa(S,E,W)??160;
-  const sag=ok(H)&&ok(A)&&H.y>Math.max(S.y,A.y)+0.04;
-  const pike=ok(H)&&ok(A)&&H.y<Math.min(S.y,A.y)-0.06;
-  const s=repState[currentEx];
-  if(ea<92) tryEnterPhase(s,'down');
-  if(ea>152&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
-  const issues=[];let grade='A';
-  if(sag){issues.push({msg:'ENGAGE CORE - HIPS SAGGING',sev:'bad'});grade='C'}
-  if(pike){issues.push({msg:'LOWER HIPS - BODY STRAIGHT',sev:'warn'});if(grade==='A')grade='B'}
-  if(!issues.length){
-    if(ea<98)issues.push({msg:'FULL DEPTH - DRIVE UP!',sev:'good'})
-    else if(ea<152)issues.push({msg:'GOING DOWN - CONTROLLED',sev:'warn'})
-    else issues.push({msg:'ARMS LOCKED - NEXT REP',sev:'good'})
-  }
-  return{valid:true,a1:ea,a2:null,issues,grade,reps:s.reps}
-}
-
 function analyzeCurl(lm){
   const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
   if(!ok(LS)&&!ok(RS))return{valid:false,msg:'FACE CAMERA - ARMS VISIBLE',grade:'?'};
@@ -935,37 +913,38 @@ function analyzePosture(lm){
 }
 
 // EXERCISE CONFIG MAP
+// u1/u2 = unit suffix for HUD display. '°' = degrees (default), '' = unitless score/ratio
 const EX_CFG={
-  floor_press:  {fn:lm=>analyzeFloorPress(lm,false),  a1:'WRIST ELEV', a2:null},
-  floor_flye:   {fn:analyzeFloorFlye,                  a1:'ARM SPREAD', a2:null},
-  pushup:       {fn:analyzePushup,                     a1:'ELBOW ANG', a2:null},
-  skull_crusher:{fn:analyzeSkullCrusher,               a1:'ELBOW ANG', a2:null},
-  ohd_tri_ext:  {fn:analyzeOHDTricepExt,              a1:'ELBOW ANG', a2:'BACK DEG'},
-  bent_row:     {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG', a2:'ELBOW ANG'},
-  single_row:   {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG', a2:'ELBOW ANG'},
-  stiff_rdl:    {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG', a2:null},
-  hammer_curl:  {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
-  conc_curl:    {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
-  goblet_sq:    {fn:lm=>analyzeSquat(lm,'goblet'),     a1:'KNEE ANG',  a2:'BACK DEG'},
-  rom_dl:       {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG', a2:null},
-  rev_lunge:    {fn:analyzeLunge,                      a1:'KNEE ANG',  a2:'TORSO DEG'},
-  sumo_sq:      {fn:lm=>analyzeSquat(lm,'sumo'),       a1:'KNEE ANG',  a2:'BACK DEG'},
-  calf_raise:   {fn:analyzeCalfRaise,                  a1:'BODY LEAN', a2:null},
-  ohd_press:    {fn:analyzeOHDPress,                   a1:'ELBOW ANG', a2:'BACK DEG'},
-  lat_raise:    {fn:analyzeLateralRaise,               a1:'ARM HEIGHT',a2:null},
-  front_raise:  {fn:analyzeFrontRaise,                 a1:'ARM HEIGHT',a2:null},
-  upright_row:  {fn:analyzeUprightRow,                 a1:'ELB HEIGHT',a2:null},
-  shrug:        {fn:analyzeShrug,                      a1:'ELEVATION', a2:'ASYMMETRY'},
-  db_curl:      {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
-  incline_curl: {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
-  hammer_curl2: {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
-  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'WRIST ELEV', a2:null},
-  tri_kick:     {fn:analyzeTricepKickback,              a1:'ELBOW ANG', a2:'TORSO DEG'},
-  sq_press:     {fn:lm=>analyzeSquat(lm,'sqpress'),    a1:'KNEE ANG',  a2:'ELBOW ANG'},
-  deadlift:     {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG', a2:null},
-  push_press:   {fn:analyzeOHDPress,                   a1:'ELBOW ANG', a2:'BACK DEG'},
-  renegade_row: {fn:analyzeRenegadeRow,                 a1:'ELBOW ANG', a2:null},
-  farmers_carry:{fn:analyzePosture,                    a1:'BODY LEAN', a2:'SHLDR ASYM'},
+  floor_press:  {fn:lm=>analyzeFloorPress(lm,false),  a1:'WRIST ELEV', u1:'',  a2:null},
+  floor_flye:   {fn:analyzeFloorFlye,                  a1:'ARM SPREAD', u1:'x', a2:null},
+  pushup:       {fn:analyzePushup,                     a1:'ELBOW ANG',  a2:null},
+  skull_crusher:{fn:analyzeSkullCrusher,               a1:'ELBOW ANG',  a2:null},
+  ohd_tri_ext:  {fn:analyzeOHDTricepExt,              a1:'ELBOW ANG',  a2:'BACK DEG'},
+  bent_row:     {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG',  a2:'ELBOW ANG'},
+  single_row:   {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG',  a2:'ELBOW ANG'},
+  stiff_rdl:    {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  hammer_curl:  {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  conc_curl:    {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  goblet_sq:    {fn:lm=>analyzeSquat(lm,'goblet'),     a1:'KNEE ANG',   a2:'BACK DEG'},
+  rom_dl:       {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  rev_lunge:    {fn:analyzeLunge,                      a1:'KNEE ANG',   a2:'TORSO DEG'},
+  sumo_sq:      {fn:lm=>analyzeSquat(lm,'sumo'),       a1:'KNEE ANG',   a2:'BACK DEG'},
+  calf_raise:   {fn:analyzeCalfRaise,                  a1:'BODY LEAN',  a2:null},
+  ohd_press:    {fn:analyzeOHDPress,                   a1:'ELBOW ANG',  a2:'BACK DEG'},
+  lat_raise:    {fn:analyzeLateralRaise,               a1:'ARM HEIGHT', u1:'', a2:null},
+  front_raise:  {fn:analyzeFrontRaise,                 a1:'ARM HEIGHT', u1:'', a2:null},
+  upright_row:  {fn:analyzeUprightRow,                 a1:'ELB HEIGHT', u1:'', a2:null},
+  shrug:        {fn:analyzeShrug,                      a1:'ELEVATION',  u1:'', a2:'ASYMMETRY', u2:''},
+  db_curl:      {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  incline_curl: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  hammer_curl2: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'WRIST ELEV', u1:'',  a2:null},
+  tri_kick:     {fn:analyzeTricepKickback,              a1:'ELBOW ANG',  a2:'TORSO DEG'},
+  sq_press:     {fn:lm=>analyzeSquat(lm,'sqpress'),    a1:'KNEE ANG',   a2:'ELBOW ANG'},
+  deadlift:     {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  push_press:   {fn:analyzeOHDPress,                   a1:'ELBOW ANG',  a2:'BACK DEG'},
+  renegade_row: {fn:analyzeRenegadeRow,                 a1:'ELBOW ANG',  a2:null},
+  farmers_carry:{fn:analyzePosture,                    a1:'BODY LEAN',  a2:'SHLDR ASYM', u2:''},
 };
 
 // ════════════════════════════════════════════════
@@ -1517,15 +1496,19 @@ function updateHUD(r,cfg){
 // Show angles in HUD without touching reps or grade (used during gate)
 function updateHUDAnglesOnly(r,cfg){
   const a1el=document.getElementById('h-a1');
-  a1el.textContent=r.a1!==null&&r.a1!==undefined?r.a1+(cfg.a1&&cfg.a1.includes('%')?'':'°'):'---';
+  const u1 = 'u1' in cfg ? cfg.u1 : '°';
+  a1el.textContent=r.a1!==null&&r.a1!==undefined?r.a1+u1:'---';
   a1el.className='card-val';
   const ca2=document.getElementById('card-a2');
   if(cfg.a2&&r.a2!==null&&r.a2!==undefined){
     ca2.style.display='';
     document.getElementById('lbl-a2').textContent=cfg.a2;
     const a2el=document.getElementById('h-a2');
-    a2el.textContent=r.a2+(cfg.a2.includes('%')?'':'°');
-    a2el.className='card-val '+(r.a2>50?'bad':r.a2>25?'warn':'');
+    const u2 = 'u2' in cfg ? cfg.u2 : '°';
+    a2el.textContent=r.a2+u2;
+    // Color coding only applies to back/torso lean angles (high = bad form)
+    const isLeanAngle = cfg.a2 && (cfg.a2.includes('BACK')||cfg.a2.includes('TORSO'));
+    a2el.className='card-val '+(isLeanAngle?(r.a2>50?'bad':r.a2>25?'warn':''):'');
   }else ca2.style.display='none';
 }
 
