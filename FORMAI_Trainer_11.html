@@ -140,6 +140,43 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
   display:none;font-weight:bold;
 }
 #ai-badge.thinking{background:#fffbf0;border-color:rgba(204,119,0,.3);color:var(--amber)}
+
+/* ── PAUSE BUTTON ───────────────────────── */
+.ctrl-btn.paused{color:var(--red);border-color:rgba(232,0,42,.5);background:#fff5f5}
+
+/* ── SET HUD CARD ───────────────────────── */
+#card-set{display:none}
+
+/* ── REST OVERLAY ───────────────────────── */
+#rest-overlay{
+  position:absolute;inset:0;z-index:25;
+  background:rgba(10,12,20,.82);backdrop-filter:blur(6px);
+  display:none;align-items:center;justify-content:center;
+}
+.rest-box{
+  background:var(--panel);border:2px solid var(--border);
+  border-radius:10px;padding:36px 44px;text-align:center;
+  box-shadow:0 8px 40px rgba(0,0,0,.35);min-width:300px;
+  display:flex;flex-direction:column;gap:14px;align-items:center;
+}
+.rest-set-label{
+  font-family:'Bebas Neue',cursive;font-size:3.2rem;
+  color:var(--accent);line-height:1;letter-spacing:4px;
+}
+.rest-set-label.done{color:#22aa55}
+.rest-sub-label{
+  font-size:.8rem;letter-spacing:3px;color:#888;font-weight:bold;
+}
+.rest-cta{
+  margin-top:6px;background:var(--accent);border:none;color:#fff;
+  padding:14px 38px;font-family:'Orbitron',monospace;font-size:.85rem;
+  font-weight:700;letter-spacing:3px;cursor:pointer;border-radius:4px;
+  transition:all .2s;box-shadow:0 4px 18px rgba(0,102,255,.35);
+  width:100%;
+}
+.rest-cta:hover{background:#0055dd;box-shadow:0 6px 22px rgba(0,102,255,.45)}
+.rest-cta.finish{background:#22aa55;box-shadow:0 4px 18px rgba(34,170,85,.35)}
+.rest-cta.finish:hover{background:#1a9944}
 </style>
 </head>
 <body>
@@ -151,6 +188,8 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
   <span style="font-size:.85rem;letter-spacing:2px;color:#888;font-weight:bold" id="ex-title">SELECT DAY &amp; EXERCISE</span>
   <div class="ml">
     <button class="ctrl-btn" onclick="resetReps()">&#x21BA; RESET</button>
+    <button class="ctrl-btn" id="done-set-btn" onclick="doneWithSet()" style="display:none">&#x2713; SET DONE</button>
+    <button class="ctrl-btn" id="pause-btn"    onclick="togglePause()" style="display:none">&#x23F8; PAUSE</button>
     <button class="ctrl-btn voice" id="voice-btn" onclick="toggleVoice()">&#x1F50A; VOICE</button>
   </div>
 </div>
@@ -188,6 +227,10 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
       <div class="card-lbl">PACE</div>
       <div class="card-val" id="h-pace" style="font-size:.75rem;letter-spacing:1px">FRESH</div>
     </div>
+    <div class="card" id="card-set">
+      <div class="card-lbl">SET</div>
+      <div class="card-val" id="h-set" style="font-size:1.4rem;letter-spacing:1px">1</div>
+    </div>
   </div>
   <div id="start-overlay">
     <div class="s-title">FORM<span class="dot">.</span>AI</div>
@@ -214,6 +257,15 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
     <div class="ld-spin"></div>
     <div class="ld-t" id="ld-main">LOADING POSE MODEL</div>
     <div class="ld-s">DOWNLOADING ~6MB &middot; ONE-TIME ONLY</div>
+  </div>
+
+  <!-- Rest / set-complete overlay -->
+  <div id="rest-overlay">
+    <div class="rest-box">
+      <div class="rest-set-label" id="rest-title">SET 1 DONE</div>
+      <div class="rest-sub-label" id="rest-sub">REST UP &mdash; TAP WHEN READY</div>
+      <button class="rest-cta" id="rest-cta-btn" onclick="tapReady()">&#x25B6; READY FOR SET 2</button>
+    </div>
   </div>
 </div>
 
@@ -270,6 +322,7 @@ const WORKOUT = {
 };
 
 let currentEx='floor_press', voiceOn=true, lastMsg='', lastMsgAt=0, lmCache=[];
+let isPaused=false, isResting=false;
 
 // Exercises where resting position = "top" so we need to wait for a full DOWN first
 // before counting. Starting them at phase:'down' prevents false reps on load.
@@ -285,7 +338,7 @@ function initPhase(id){ return NEEDS_DOWN_START.has(id)?'down':'up'; }
 
 const repState={};
 Object.values(WORKOUT).forEach(d=>d.exercises.forEach(e=>{
-  repState[e.id]={reps:0, phase:initPhase(e.id), lastRepAt:0, repTimes:[], repDepths:[], pendingPhase:null, pendingFrames:0};
+  repState[e.id]={reps:0, phase:initPhase(e.id), lastRepAt:0, repTimes:[], repDepths:[], pendingPhase:null, pendingFrames:0, setsCompleted:0};
 }));
 
 // Debounced rep counter — min 700ms between reps prevents noise spikes
@@ -1396,6 +1449,16 @@ function onResults(results){
   if(video.videoHeight)canvas.height=video.videoHeight;
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const dot=document.getElementById('live-dot'),stx=document.getElementById('status-txt');
+
+  // While paused or resting: draw skeleton for visual feedback but skip all
+  // rep counting, gate logic, and AI calls so no credits are consumed.
+  if(isPaused||isResting){
+    if(results.poseLandmarks){ lmCache=results.poseLandmarks; drawSkeleton(lmCache); }
+    dot.className='live-dot on';
+    stx.textContent=isResting?'RESTING':'PAUSED';
+    return;
+  }
+
   if(!results.poseLandmarks){
     dot.className='live-dot on';stx.textContent='NO POSE';
     setFeedback('NO POSE - STEP INTO FRAME','warn','👁️');
@@ -1458,6 +1521,7 @@ function updateHUD(r,cfg){
   const g=document.getElementById('h-grade');
   g.textContent=r.grade||'-';
   g.className='card-val grade grade-'+(r.grade||'A');
+  updateSetHUD();
 
   // ── Fatigue tracking ──
   const fc=getFatigueContext(currentEx);
@@ -1644,6 +1708,7 @@ function buildCoachPrompt(exLabel, r){
 // Fire-and-forget — never blocks the main loop
 async function callClaude(exLabel, r){
   if(!apiKey) return;                                   // no key = skip silently
+  if(isPaused||isResting) return;                       // paused/resting = no credits burned
   if(claudeInFlight) return;                            // already waiting
   const now=Date.now();
   if(now-claudeLastCall < CLAUDE_INTERVAL) return;      // throttle
@@ -1817,6 +1882,11 @@ function selectExById(id,btn){
   clearSmoothHistory();
   // Also reset any pending phase state from previous exercise
   if(repState[id]){ repState[id].pendingPhase=null; repState[id].pendingFrames=0; }
+  // Close rest overlay and cancel any active pause when switching exercises
+  isResting=false; isPaused=false;
+  document.getElementById('rest-overlay').style.display='none';
+  syncPauseBtn();
+  updateSetHUD();
   setFeedback(exData.note||'READY','warn','💪');
   trySpeak(exData.label.toLowerCase()+'. '+((exData.note||'').split(',')[0]).toLowerCase());
 }
@@ -1832,6 +1902,118 @@ function resetReps(){
   document.getElementById('card-pace').style.display='none';
   resetGate();
   setFeedback('REPS RESET — GET BACK IN POSITION','warn','↺');
+}
+
+// ════════════════════════════════════════════════
+// SET MANAGEMENT — done with set / rest / pause
+// ════════════════════════════════════════════════
+
+function getTotalSets(exId){
+  for(const d of Object.values(WORKOUT)){
+    const f=d.exercises.find(e=>e.id===exId);
+    if(f) return f.sets;
+  }
+  return 3;
+}
+
+function updateSetHUD(){
+  const s=repState[currentEx];
+  if(!s) return;
+  const total=getTotalSets(currentEx);
+  const current=s.setsCompleted+1;
+  const card=document.getElementById('card-set');
+  const val=document.getElementById('h-set');
+  if(GATE.state==='ACTIVE'||s.setsCompleted>0){
+    card.style.display='';
+    val.textContent=Math.min(current,total)+'/'+total;
+  } else {
+    card.style.display='none';
+  }
+}
+
+function doneWithSet(){
+  if(!currentEx||isResting) return;
+  const s=repState[currentEx];
+  s.setsCompleted++;
+  const total=getTotalSets(currentEx);
+  const allDone=s.setsCompleted>=total;
+
+  isResting=true;
+  isPaused=false; // rest takes over from manual pause if both active
+  resetGate();
+  window.speechSynthesis.cancel();
+
+  const title=document.getElementById('rest-title');
+  const sub=document.getElementById('rest-sub');
+  const btn=document.getElementById('rest-cta-btn');
+
+  if(allDone){
+    title.className='rest-set-label done';
+    title.textContent='ALL '+total+' SETS DONE!';
+    sub.textContent='GREAT WORK — SELECT NEXT EXERCISE';
+    btn.textContent='▶ NEXT EXERCISE';
+    btn.className='rest-cta finish';
+    trySpeak('All '+total+' sets complete! Great work!');
+  } else {
+    const next=s.setsCompleted+1;
+    title.className='rest-set-label';
+    title.textContent='SET '+s.setsCompleted+' / '+total+' DONE';
+    sub.textContent='REST UP — TAP WHEN READY';
+    btn.textContent='▶ READY FOR SET '+next;
+    btn.className='rest-cta';
+    trySpeak('Set '+s.setsCompleted+' complete. Rest up.');
+  }
+
+  document.getElementById('rest-overlay').style.display='flex';
+  // Sync pause button appearance while resting
+  syncPauseBtn();
+  updateSetHUD();
+}
+
+function tapReady(){
+  isResting=false;
+  document.getElementById('rest-overlay').style.display='none';
+  // Reset reps for the new set
+  const s=repState[currentEx];
+  s.reps=0; s.phase=initPhase(currentEx); s.lastRepAt=0;
+  s.repTimes=[]; s.repDepths=[]; s.pendingPhase=null; s.pendingFrames=0;
+  fatigueAngleCapture=null; lastFatigueCueAt=0;
+  document.getElementById('h-reps').textContent='0';
+  document.getElementById('card-pace').style.display='none';
+  resetGate();
+  syncPauseBtn();
+  updateSetHUD();
+  const next=s.setsCompleted+1;
+  const total=getTotalSets(currentEx);
+  if(s.setsCompleted<total){
+    setFeedback('SET '+next+' — GET BACK IN POSITION','warn','💪');
+    trySpeak('Set '+next+'. Get in position.');
+  } else {
+    setFeedback('ALL SETS DONE — SELECT NEXT EXERCISE','good','✅');
+  }
+}
+
+function togglePause(){
+  if(isResting) return; // rest overlay handles its own state
+  isPaused=!isPaused;
+  if(isPaused){
+    resetGate();
+    window.speechSynthesis.cancel();
+    setFeedback('PAUSED — TAP RESUME TO CONTINUE','warn','⏸');
+  } else {
+    setFeedback('RESUMED — GET BACK IN POSITION','warn','▶');
+    trySpeak('Resuming.');
+  }
+  syncPauseBtn();
+}
+
+function syncPauseBtn(){
+  const btn=document.getElementById('pause-btn');
+  if(isPaused){
+    btn.textContent='▶ RESUME'; btn.className='ctrl-btn paused';
+  } else {
+    btn.textContent='⏸ PAUSE'; btn.className='ctrl-btn';
+  }
 }
 
 function toggleVoice(){
@@ -1890,6 +2072,9 @@ async function boot(){
     ld.style.display='none';
     document.getElementById('live-dot').className='live-dot on';
     document.getElementById('status-txt').textContent='LIVE';
+    // Reveal set-management controls now that camera is running
+    document.getElementById('done-set-btn').style.display='';
+    document.getElementById('pause-btn').style.display='';
     detectLoop(); // start the rAF loop
 
     if(apiKey){
