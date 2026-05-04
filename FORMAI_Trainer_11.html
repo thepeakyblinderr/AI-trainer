@@ -1,0 +1,1931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FORM.AI — Virtual Gym Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<!-- TensorFlow.js + MoveNet Thunder -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--accent:#0066ff;--red:#e8002a;--amber:#cc7700;--blue:#0055cc;--bg:#f0f2f5;--panel:rgba(255,255,255,.97);--border:rgba(0,102,255,.2);--text:#111;--muted:#999}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text)}
+body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
+
+/* ── TOP BAR ────────────────────────────── */
+#topbar{height:56px;flex-shrink:0;background:var(--panel);border-bottom:2px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:14px;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+.logo{font-family:'Orbitron',monospace;font-weight:900;font-size:1.25rem;letter-spacing:5px;white-space:nowrap;color:var(--accent)}
+.logo .dot{color:var(--red)}
+.status{display:flex;align-items:center;gap:7px;font-size:.75rem;letter-spacing:2px;color:#bbb;white-space:nowrap}
+.live-dot{width:9px;height:9px;border-radius:50%;background:#ddd;flex-shrink:0;transition:all .3s}
+.live-dot.on{background:#22cc66;box-shadow:0 0 8px #22cc66;animation:blink 1.6s ease-in-out infinite}
+.live-dot.analyzing{background:var(--amber);box-shadow:0 0 8px var(--amber);animation:blink .7s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.vd{width:1px;height:28px;background:#ddd;flex-shrink:0}
+.ml{margin-left:auto;display:flex;gap:7px}
+.ctrl-btn{background:#fff;border:1px solid #ddd;color:#555;padding:7px 14px;font-family:'Share Tech Mono',monospace;font-size:.75rem;letter-spacing:1.5px;cursor:pointer;transition:all .15s;white-space:nowrap;border-radius:4px;font-weight:bold}
+.ctrl-btn:hover{color:#111;border-color:#aaa;background:#f5f5f5}
+.ctrl-btn.voice{color:var(--amber);border-color:rgba(204,119,0,.5);background:#fffbf0}
+.ctrl-btn.muted{color:#aaa;border-color:#ddd;background:#fff}
+
+/* ── DAY BAR ────────────────────────────── */
+#daybar{height:48px;flex-shrink:0;background:#fff;border-bottom:2px solid #e0e4f0;display:flex;align-items:center;padding:0 14px;gap:6px;z-index:9}
+.day-btn{background:none;border:2px solid #ddd;color:#999;padding:5px 14px;font-family:'Share Tech Mono',monospace;font-size:.75rem;letter-spacing:1.5px;cursor:pointer;transition:all .15s;white-space:nowrap;border-radius:4px;font-weight:bold}
+.day-btn:hover{color:#333;border-color:#999;background:#f5f5f5}
+.day-btn.on{color:#fff;border-color:var(--accent);background:var(--accent)}
+.day-btn .day-sub{font-size:.55rem;display:block;letter-spacing:1px;margin-top:1px;opacity:.8}
+
+/* ── EXERCISE BAR ───────────────────────── */
+#exbar{height:46px;flex-shrink:0;background:#f7f8fc;border-bottom:2px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:6px;z-index:8;overflow-x:auto;scrollbar-width:none}
+#exbar::-webkit-scrollbar{display:none}
+.ex-btn{background:#fff;border:2px solid #ddd;color:#888;padding:6px 14px;font-family:'Share Tech Mono',monospace;font-size:.75rem;letter-spacing:1px;cursor:pointer;transition:all .15s;white-space:nowrap;flex-shrink:0;border-radius:4px;font-weight:bold}
+.ex-btn:hover{color:#222;border-color:#999}
+.ex-btn.on{color:var(--accent);border-color:var(--accent);background:#eef3ff}
+
+/* ── MAIN CAMERA AREA ───────────────────── */
+#main{flex:1;position:relative;overflow:hidden;min-height:0}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#main::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:3}
+.br{position:absolute;width:32px;height:32px;z-index:4;pointer-events:none}
+.br-tl{top:10px;left:10px;border-top:3px solid rgba(0,102,255,.7);border-left:3px solid rgba(0,102,255,.7)}
+.br-tr{top:10px;right:10px;border-top:3px solid rgba(0,102,255,.7);border-right:3px solid rgba(0,102,255,.7)}
+.br-bl{bottom:10px;left:10px;border-bottom:3px solid rgba(0,102,255,.7);border-left:3px solid rgba(0,102,255,.7)}
+.br-br{bottom:10px;right:10px;border-bottom:3px solid rgba(0,102,255,.7);border-right:3px solid rgba(0,102,255,.7)}
+
+/* ── HUD CARDS ──────────────────────────── */
+#hud-right{position:absolute;right:14px;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;gap:8px}
+.card{background:rgba(255,255,255,.96);border:2px solid rgba(0,102,255,.2);padding:10px 16px;min-width:130px;backdrop-filter:blur(8px);box-shadow:0 3px 16px rgba(0,0,0,.15);border-radius:6px}
+.card-lbl{font-size:.7rem;letter-spacing:2px;color:#888;margin-bottom:2px;font-weight:bold}
+.card-val{font-size:1.8rem;line-height:1;color:var(--accent);transition:color .25s}
+.card-val.big{font-family:'Bebas Neue',cursive;font-size:4.5rem}
+.card-val.grade{font-family:'Bebas Neue',cursive;font-size:4rem}
+.card-val.warn{color:var(--amber)}
+.card-val.bad{color:var(--red)}
+.grade-A{color:#22aa55}.grade-B{color:#66aa00}.grade-C{color:var(--amber)}.grade-F{color:var(--red)}
+
+/* ── CAMERA TAG ─────────────────────────── */
+.cam-tag{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,.95);border:2px solid rgba(0,85,204,.35);color:var(--blue);font-size:.8rem;letter-spacing:2px;padding:6px 18px;z-index:5;pointer-events:none;backdrop-filter:blur(6px);white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,.12);border-radius:4px;font-weight:bold}
+
+/* ── TARGET BADGE ───────────────────────── */
+#sr-badge{position:absolute;left:14px;top:14px;z-index:5;background:rgba(255,255,255,.95);border:2px solid rgba(0,102,255,.2);padding:8px 14px;backdrop-filter:blur(8px);box-shadow:0 2px 10px rgba(0,0,0,.1);border-radius:6px}
+.sr-lbl{font-size:.65rem;letter-spacing:2px;color:#888;font-weight:bold}
+.sr-val{font-size:1.1rem;letter-spacing:1px;color:var(--accent);font-weight:bold}
+
+/* ── START OVERLAY ──────────────────────── */
+#start-overlay{position:absolute;inset:0;background:rgba(240,242,245,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:20}
+.s-title{font-family:'Orbitron',monospace;font-weight:900;font-size:clamp(2rem,7vw,5rem);letter-spacing:8px;color:var(--accent)}
+.s-title .dot{color:var(--red)}
+.s-sub{font-size:.8rem;letter-spacing:3px;color:#999}
+.s-grid{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:5px 0}
+.s-card{border:2px solid #dde;padding:8px 14px;font-size:.7rem;letter-spacing:1px;color:#888;text-align:center;min-width:105px;background:#fff;border-radius:4px}
+.s-card span{display:block;color:var(--accent);font-size:.85rem;margin-bottom:3px;font-weight:bold}
+.s-cta{margin-top:6px;background:var(--accent);border:none;color:#fff;padding:14px 42px;font-family:'Orbitron',monospace;font-size:.85rem;font-weight:700;letter-spacing:4px;cursor:pointer;transition:all .2s;border-radius:4px;box-shadow:0 4px 18px rgba(0,102,255,.35)}
+.s-cta:hover{background:#0055dd;box-shadow:0 6px 22px rgba(0,102,255,.45)}
+
+/* ── LOADING ────────────────────────────── */
+#loading-msg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:15;background:rgba(240,242,245,.95);flex-direction:column;gap:12px}
+.ld-spin{width:36px;height:36px;border:3px solid #ddd;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ld-t{font-size:.85rem;letter-spacing:3px;color:#555}
+.ld-s{font-size:.7rem;letter-spacing:2px;color:#aaa}
+
+/* ── FEEDBACK BAR ───────────────────────── */
+#feedback-bar{height:58px;flex-shrink:0;background:var(--panel);border-top:2px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:12px;z-index:10;box-shadow:0 -2px 10px rgba(0,0,0,.08)}
+.fb-icon{font-size:1.4rem;width:28px;text-align:center}
+.fb-text{font-size:1rem;letter-spacing:1.5px;flex:1;color:#999;transition:color .3s;font-weight:bold}
+.fb-text.good{color:#22aa55}.fb-text.warn{color:var(--amber)}.fb-text.bad{color:var(--red)}
+
+/* ── GATE OVERLAY ───────────────────────── */
+#gate-overlay{
+  position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+  z-index:6;display:none;flex-direction:column;align-items:center;gap:7px;
+  pointer-events:none;min-width:280px;
+}
+.gate-pill{
+  background:rgba(255,255,255,.96);border:2px solid var(--accent);
+  padding:10px 24px;font-size:.85rem;letter-spacing:2px;
+  color:var(--accent);backdrop-filter:blur(8px);white-space:nowrap;
+  box-shadow:0 3px 16px rgba(0,102,255,.2);width:100%;text-align:center;
+  border-radius:4px;font-weight:bold;
+}
+.gate-pill.warn{border-color:var(--amber);color:var(--amber);background:rgba(255,251,240,.97)}
+.gate-pill.go  {border-color:#22aa55;color:#22aa55;background:rgba(240,255,246,.97)}
+.gate-bar-wrap{width:100%;height:7px;background:rgba(0,0,0,.1);border-radius:4px;overflow:hidden}
+.gate-bar{height:100%;width:0%;border-radius:4px;transition:width .08s linear}
+.gate-bar.positioning{background:var(--amber)}
+.gate-bar.countdown  {background:var(--accent)}
+
+/* ── CLAUDE API KEY INPUT ───────────────── */
+.key-wrap{display:flex;flex-direction:column;gap:6px;width:100%;max-width:380px;margin-top:4px}
+.key-label{font-size:.7rem;letter-spacing:2px;color:#999;text-align:left}
+.key-row{display:flex;gap:8px}
+.key-input{
+  flex:1;background:#fff;border:2px solid #ddd;color:#333;
+  padding:10px 14px;font-family:'Share Tech Mono',monospace;
+  font-size:.8rem;letter-spacing:1px;border-radius:4px;outline:none;
+}
+.key-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,102,255,.12)}
+.key-input::placeholder{color:#ccc}
+.key-toggle{background:#f5f5f5;border:2px solid #ddd;color:#777;padding:10px 12px;cursor:pointer;font-size:.9rem;border-radius:4px}
+.key-note{font-size:.6rem;letter-spacing:1.5px;color:#bbb;text-align:left}
+/* AI badge on feedback bar */
+#ai-badge{
+  font-size:.7rem;letter-spacing:2px;padding:4px 10px;
+  background:#eef3ff;border:2px solid rgba(0,102,255,.3);
+  color:var(--accent);border-radius:3px;white-space:nowrap;flex-shrink:0;
+  display:none;font-weight:bold;
+}
+#ai-badge.thinking{background:#fffbf0;border-color:rgba(204,119,0,.3);color:var(--amber)}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">FORM<span class="dot">.</span>AI</div>
+  <div class="status"><div class="live-dot" id="live-dot"></div><span id="status-txt">STANDBY</span></div>
+  <div class="vd"></div>
+  <span style="font-size:.85rem;letter-spacing:2px;color:#888;font-weight:bold" id="ex-title">SELECT DAY &amp; EXERCISE</span>
+  <div class="ml">
+    <button class="ctrl-btn" onclick="resetReps()">&#x21BA; RESET</button>
+    <button class="ctrl-btn voice" id="voice-btn" onclick="toggleVoice()">&#x1F50A; VOICE</button>
+  </div>
+</div>
+
+<div id="daybar">
+  <button class="day-btn on" onclick="selectDay(this,'mon')">MON<span class="day-sub">CHEST&middot;TRIS</span></button>
+  <button class="day-btn"    onclick="selectDay(this,'tue')">TUE<span class="day-sub">BACK&middot;BICEPS</span></button>
+  <button class="day-btn"    onclick="selectDay(this,'wed')">WED<span class="day-sub">LEGS&middot;GLUTES</span></button>
+  <button class="day-btn"    onclick="selectDay(this,'thu')">THU<span class="day-sub">SHOULDERS</span></button>
+  <button class="day-btn"    onclick="selectDay(this,'fri')">FRI<span class="day-sub">ARMS</span></button>
+  <button class="day-btn"    onclick="selectDay(this,'sat')">SAT<span class="day-sub">FULL BODY</span></button>
+</div>
+
+<div id="exbar"></div>
+
+<div id="main">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="br br-tl"></div><div class="br br-tr"></div>
+  <div class="br br-bl"></div><div class="br br-br"></div>
+  <div id="sr-badge"><div class="sr-lbl">TARGET</div><div class="sr-val" id="sr-val">-- x --</div></div>
+  <div class="cam-tag" id="cam-tag">&#x1F4F7; FACE CAMERA</div>
+
+  <!-- Gate overlay — shown during POSITIONING and COUNTDOWN states -->
+  <div id="gate-overlay">
+    <div class="gate-pill warn" id="gate-pill">DETECTING POSE...</div>
+    <div class="gate-bar-wrap"><div class="gate-bar positioning" id="gate-bar"></div></div>
+  </div>
+  <div id="hud-right">
+    <div class="card"><div class="card-lbl">REPS</div><div class="card-val big" id="h-reps">0</div></div>
+    <div class="card" id="card-a1"><div class="card-lbl" id="lbl-a1">ANGLE 1</div><div class="card-val" id="h-a1">---</div></div>
+    <div class="card" id="card-a2"><div class="card-lbl" id="lbl-a2">ANGLE 2</div><div class="card-val" id="h-a2">---</div></div>
+    <div class="card"><div class="card-lbl">FORM</div><div class="card-val grade grade-A" id="h-grade">-</div></div>
+    <div class="card" id="card-pace" style="display:none">
+      <div class="card-lbl">PACE</div>
+      <div class="card-val" id="h-pace" style="font-size:.75rem;letter-spacing:1px">FRESH</div>
+    </div>
+  </div>
+  <div id="start-overlay">
+    <div class="s-title">FORM<span class="dot">.</span>AI</div>
+    <div class="s-sub">6-DAY DUMBBELL PLAN &middot; REAL-TIME POSE COACHING</div>
+    <div class="s-grid">
+      <div class="s-card"><span>MON</span>Chest &amp; Triceps</div>
+      <div class="s-card"><span>TUE</span>Back &amp; Biceps</div>
+      <div class="s-card"><span>WED</span>Legs &amp; Glutes</div>
+      <div class="s-card"><span>THU</span>Shoulders &amp; Traps</div>
+      <div class="s-card"><span>FRI</span>Arms</div>
+      <div class="s-card"><span>SAT</span>Full Body</div>
+    </div>
+    <button class="s-cta" onclick="boot()">&#x25B6; ACTIVATE CAMERA</button>
+    <div class="key-wrap">
+      <div class="key-label">&#x1F916; AI COACHING — OPTIONAL (aicredits.in)</div>
+      <div class="key-row">
+        <input class="key-input" type="password" id="api-key-input" placeholder="AICredits API key..." autocomplete="off" spellcheck="false">
+        <button class="key-toggle" onclick="toggleKeyVis()" id="key-toggle-btn">&#x1F441;</button>
+      </div>
+      <div class="key-note">&#x1F512; PAY IN INR VIA UPI AT aicredits.in &middot; KEY STAYS ON YOUR DEVICE &middot; LEAVE BLANK FOR RULE-BASED COACHING</div>
+    </div>
+  </div>
+  <div id="loading-msg">
+    <div class="ld-spin"></div>
+    <div class="ld-t" id="ld-main">LOADING POSE MODEL</div>
+    <div class="ld-s">DOWNLOADING ~6MB &middot; ONE-TIME ONLY</div>
+  </div>
+</div>
+
+<div id="feedback-bar">
+  <span class="fb-icon" id="fb-icon">&#x1F4A4;</span>
+  <span class="fb-text" id="fb-text">ACTIVATE CAMERA TO BEGIN</span>
+  <span id="ai-badge">AI</span>
+</div>
+
+<script>
+const WORKOUT = {
+  mon:{label:'CHEST & TRICEPS',exercises:[
+    {id:'floor_press',   label:'FLOOR PRESS',      sets:4,reps:'8-12', cam:'SIDE', note:'Lie on back, camera from your side'},
+    {id:'floor_flye',    label:'FLOOR FLYE',        sets:3,reps:'12-15',cam:'FRONT',note:'Lie on back, camera above facing you'},
+    {id:'pushup',        label:'PUSH-UP',           sets:3,reps:'15-20',cam:'SIDE', note:'Camera at ground level, side-on'},
+    {id:'skull_crusher', label:'SKULL CRUSHER',     sets:3,reps:'10-12',cam:'SIDE', note:'Lie on back, camera from your side'},
+    {id:'ohd_tri_ext',   label:'OHD TRICEP EXT',    sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, arms overhead'},
+  ]},
+  tue:{label:'BACK & BICEPS',exercises:[
+    {id:'bent_row',      label:'BENT-OVER ROW',     sets:4,reps:'8-12', cam:'SIDE', note:'Hinge forward, camera from your side'},
+    {id:'single_row',    label:'SINGLE ARM ROW',    sets:3,reps:'10-12',cam:'SIDE', note:'Lean on chair, camera from your side'},
+    {id:'stiff_rdl',     label:'STIFF-LEG DL',      sets:4,reps:'10-12',cam:'SIDE', note:'Hip hinge, camera from your side'},
+    {id:'hammer_curl',   label:'HAMMER CURL',       sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, elbows tucked in'},
+    {id:'conc_curl',     label:'CONC. CURL',        sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, elbow braced on knee'},
+  ]},
+  wed:{label:'LEGS & GLUTES',exercises:[
+    {id:'goblet_sq',     label:'GOBLET SQUAT',      sets:4,reps:'10-15',cam:'FRONT',note:'Face camera, hold DB at chest'},
+    {id:'rom_dl',        label:'ROMANIAN DL',       sets:4,reps:'10-12',cam:'SIDE', note:'Hip hinge, camera from your side'},
+    {id:'rev_lunge',     label:'REVERSE LUNGE',     sets:3,reps:'12ea', cam:'FRONT',note:'Face camera, step back to lunge'},
+    {id:'sumo_sq',       label:'SUMO SQUAT',        sets:3,reps:'12-15',cam:'FRONT',note:'Wide stance, face camera'},
+    {id:'calf_raise',    label:'CALF RAISE',        sets:4,reps:'15-20',cam:'SIDE', note:'Stand sideways, rise on toes'},
+  ]},
+  thu:{label:'SHOULDERS & TRAPS',exercises:[
+    {id:'ohd_press',     label:'OHD PRESS',         sets:4,reps:'8-12', cam:'FRONT',note:'Face camera, press overhead'},
+    {id:'lat_raise',     label:'LATERAL RAISE',     sets:3,reps:'15-20',cam:'FRONT',note:'Face camera, raise to shoulder height'},
+    {id:'front_raise',   label:'FRONT RAISE',       sets:3,reps:'12-15',cam:'SIDE', note:'Stand sideways, arms raise forward'},
+    {id:'upright_row',   label:'UPRIGHT ROW',       sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, elbows lead high'},
+    {id:'shrug',         label:'SHRUG',             sets:3,reps:'15-20',cam:'FRONT',note:'Face camera, shrug shoulders up'},
+  ]},
+  fri:{label:'ARMS',exercises:[
+    {id:'db_curl',       label:'DB CURL',           sets:4,reps:'10-12',cam:'FRONT',note:'Face camera, strict curl form'},
+    {id:'incline_curl',  label:'INCLINE CURL',      sets:3,reps:'12-15',cam:'SIDE', note:'Lean back on wall, camera from side'},
+    {id:'hammer_curl2',  label:'HAMMER CURL',       sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, neutral grip'},
+    {id:'floor_cg',      label:'CLOSE-GRIP PRESS',  sets:4,reps:'10-12',cam:'SIDE', note:'Lie on back, elbows close to body'},
+    {id:'tri_kick',      label:'TRICEP KICKBACK',   sets:3,reps:'12-15',cam:'SIDE', note:'Hinge forward, camera from side'},
+  ]},
+  sat:{label:'FULL BODY',exercises:[
+    {id:'sq_press',      label:'SQUAT TO PRESS',    sets:4,reps:'10-12',cam:'FRONT',note:'Face camera, full body visible'},
+    {id:'deadlift',      label:'DEADLIFT',          sets:3,reps:'10-12',cam:'SIDE', note:'Hip hinge, camera from your side'},
+    {id:'push_press',    label:'PUSH PRESS',        sets:3,reps:'10-12',cam:'FRONT',note:'Face camera, leg drive then press'},
+    {id:'renegade_row',  label:'RENEGADE ROW',      sets:3,reps:'8-10ea',cam:'SIDE',note:'Plank position, camera from side'},
+    {id:'farmers_carry', label:"FARMER'S CARRY",    sets:3,reps:'30-40s',cam:'FRONT',note:'Face camera, walk upright'},
+  ]},
+};
+
+let currentEx='floor_press', voiceOn=true, lastMsg='', lastMsgAt=0, lmCache=[];
+
+// Exercises where resting position = "top" so we need to wait for a full DOWN first
+// before counting. Starting them at phase:'down' prevents false reps on load.
+const NEEDS_DOWN_START=new Set([
+  'db_curl','hammer_curl','hammer_curl2','conc_curl','incline_curl', // curls: arm extended at rest
+  'bent_row','single_row',          // rows: arm extended at rest
+  'lat_raise','front_raise','upright_row', // raises: arms at sides = "bottom"
+  'shrug',                          // shrug: shoulders dropped at rest
+  'tri_kick',                       // kickback: arm bent at rest
+  'renegade_row',                   // renegade: plank = arm extended
+]);
+function initPhase(id){ return NEEDS_DOWN_START.has(id)?'down':'up'; }
+
+const repState={};
+Object.values(WORKOUT).forEach(d=>d.exercises.forEach(e=>{
+  repState[e.id]={reps:0, phase:initPhase(e.id), lastRepAt:0, repTimes:[], repDepths:[], pendingPhase:null, pendingFrames:0};
+}));
+
+// Debounced rep counter — min 700ms between reps prevents noise spikes
+// depth = primary angle at bottom of rep (captured from fatigueAngleCapture)
+let fatigueAngleCapture = null; // set each frame in onResults from r.a1
+
+function countRep(s){
+  const now=Date.now();
+  if(now-s.lastRepAt<700)return;
+  s.reps++; s.lastRepAt=now;
+  // ── Tempo tracking ──
+  s.repTimes.push(now);
+  if(s.repTimes.length>10) s.repTimes.shift();
+  // ── ROM / depth tracking ──
+  if(fatigueAngleCapture!==null){
+    s.repDepths.push(fatigueAngleCapture);
+    if(s.repDepths.length>10) s.repDepths.shift();
+  }
+  trySpeak('rep '+s.reps);
+}
+
+
+// Require N consecutive frames in threshold before phase transition
+// Prevents single-frame noise spikes from counting reps
+function tryEnterPhase(s, toPhase, required=4){
+  if(s.phase===toPhase){ s.pendingPhase=null; s.pendingFrames=0; return false; }
+  if(s.pendingPhase!==toPhase){ s.pendingPhase=toPhase; s.pendingFrames=1; }
+  else s.pendingFrames++;
+  if(s.pendingFrames>=required){
+    s.phase=toPhase; s.pendingPhase=null; s.pendingFrames=0;
+    return true;
+  }
+  return false;
+}
+
+const video=document.getElementById('video'), canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
+
+// ════════════════════════════════════════════════
+// MOVENET THUNDER — POSE DETECTION INFRASTRUCTURE
+// Replaces MediaPipe. 17 keypoints, lower noise,
+// better accuracy on fast movements.
+// ════════════════════════════════════════════════
+
+let detector      = null;  // MoveNet detector instance
+let isDetecting   = false; // prevents concurrent inference calls
+
+// MoveNet keypoint index → MediaPipe landmark index
+// MoveNet: 0=nose,5=L.shoulder,6=R.shoulder,7=L.elbow,8=R.elbow,
+//          9=L.wrist,10=R.wrist,11=L.hip,12=R.hip,
+//          13=L.knee,14=R.knee,15=L.ankle,16=R.ankle
+const MN_TO_MP = {
+  0:0,  5:11, 6:12, 7:13,  8:14,
+  9:15, 10:16,11:23,12:24,13:25,
+  14:26,15:27,16:28
+};
+
+// Convert MoveNet output to MediaPipe-format sparse landmark array [33 slots]
+function adaptMoveNet(keypoints){
+  const W = video.videoWidth  || 1280;
+  const H = video.videoHeight || 720;
+  const lm = new Array(33).fill(null);
+  keypoints.forEach((kp,mnIdx)=>{
+    const mpIdx = MN_TO_MP[mnIdx];
+    if(mpIdx===undefined) return;
+    if((kp.score||0) < 0.12) return;   // discard very low-confidence points
+    lm[mpIdx] = {
+      x:          kp.x / W,            // normalise to [0,1]
+      y:          kp.y / H,
+      visibility: kp.score,
+    };
+  });
+  return lm;
+}
+
+// 5-frame weighted moving average — kills jitter without adding lag
+// Weights: [0.1, 0.15, 0.2, 0.25, 0.3] (recent frames matter more)
+const SMOOTH_W   = [0.10, 0.15, 0.20, 0.25, 0.30];
+const smoothHist = {};  // mpIdx → [{x,y,v}, ...]
+
+function smoothLandmarks(lm){
+  const out = [...lm];
+  lm.forEach((pt,idx)=>{
+    if(!pt) return;
+    if(!smoothHist[idx]) smoothHist[idx]=[];
+    smoothHist[idx].push({x:pt.x, y:pt.y, v:pt.visibility});
+    if(smoothHist[idx].length > 5) smoothHist[idx].shift();
+    const hist = smoothHist[idx];
+    const wTotal = SMOOTH_W.slice(0,hist.length).reduce((a,b)=>a+b,0);
+    let sx=0, sy=0, sv=0;
+    hist.forEach((p,i)=>{
+      const w = SMOOTH_W[i] / wTotal;
+      sx += p.x*w; sy += p.y*w; sv += p.v*w;
+    });
+    out[idx] = {x:sx, y:sy, visibility:sv};
+  });
+  return out;
+}
+
+function clearSmoothHistory(){
+  Object.keys(smoothHist).forEach(k=>delete smoothHist[k]);
+}
+
+// Main detection loop — requestAnimationFrame based
+async function detectLoop(){
+  if(!detector || !video || video.readyState < 2){
+    requestAnimationFrame(detectLoop); return;
+  }
+  if(isDetecting){ requestAnimationFrame(detectLoop); return; }
+  isDetecting = true;
+  try{
+    const poses = await detector.estimatePoses(video,{flipHorizontal:false});
+    if(poses && poses.length > 0){
+      const raw      = adaptMoveNet(poses[0].keypoints);
+      const smoothed = smoothLandmarks(raw);
+      onResults({poseLandmarks: smoothed});
+    } else {
+      onResults({poseLandmarks: null});
+    }
+  } catch(e){
+    console.error('MoveNet detection error:',e);
+  }
+  isDetecting = false;
+  requestAnimationFrame(detectLoop);
+}
+
+// --- GEOMETRY ---
+function calcAngle(A,B,C){const r=Math.atan2(C.y-B.y,C.x-B.x)-Math.atan2(A.y-B.y,A.x-B.x);let d=Math.abs(r*180/Math.PI);return d>180?360-d:d}
+function mid(a,b){return{x:(a.x+b.x)/2,y:(a.y+b.y)/2,visibility:Math.min(a.visibility??0,b.visibility??0)}}
+function ok(p,t=0.36){return p&&(p.visibility??1)>t}
+function px(lm){return{x:(1-lm.x)*canvas.width,y:lm.y*canvas.height}}
+function torsoAngle(lm){
+  const LS=lm[11],RS=lm[12],LH=lm[23],RH=lm[24];
+  const s=(ok(LS)&&ok(RS))?mid(LS,RS):ok(LS)?LS:RS;
+  const h=(ok(LH)&&ok(RH))?mid(LH,RH):ok(LH)?LH:RH;
+  if(!ok(s,.28)||!ok(h,.28))return null;
+  return Math.round(Math.atan2(Math.abs(s.x-h.x),Math.abs(s.y-h.y))*180/Math.PI);
+}
+function bestArm(lm){
+  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  const lv=(LS?.visibility??0)+(LE?.visibility??0)+(LW?.visibility??0);
+  const rv=(RS?.visibility??0)+(RE?.visibility??0)+(RW?.visibility??0);
+  return lv>=rv?[LS,LE,LW]:[RS,RE,RW];
+}
+function sa(A,B,C){if(!ok(A,.28)||!ok(B,.28)||!ok(C,.28))return null;return Math.round(calcAngle(A,B,C))}
+
+// --- ANALYZERS ---
+function analyzeSquat(lm,variant){
+  const[LH,RH,LK,RK,LA,RA,LS,RS]=[lm[23],lm[24],lm[25],lm[26],lm[27],lm[28],lm[11],lm[12]];
+  if(!ok(LH)&&!ok(RH))return{valid:false,msg:'STEP BACK - FULL BODY VISIBLE',grade:'?'};
+  const hM=mid(LH,RH),kM=mid(LK,RK),aM=mid(LA,RA);
+  const kneeAng=sa(hM,kM,aM)??180, backAng=torsoAngle(lm)??0;
+  const kW=Math.abs((LK?.x??0)-(RK?.x??0)), aW=Math.abs((LA?.x??0)-(RA?.x??0));
+  const cave=ok(LK)&&ok(LA)&&kW<aW*0.72;
+  const s=repState[currentEx];
+  if(kneeAng<105) tryEnterPhase(s,'down');
+  if(kneeAng>162&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+  const issues=[];let grade='A';
+  const maxLean=variant==='goblet'?38:48;
+  if(kneeAng<110){
+    if(backAng>maxLean){issues.push({msg:'CHEST UP - BACK ROUNDING',sev:'bad'});grade='C'}
+    if(cave){issues.push({msg:'PUSH KNEES OUT - CAVING IN',sev:'bad'});if(grade==='A')grade='B'}
+    if(variant==='sumo'){const sw=ok(LS)&&ok(RS)?Math.abs(LS.x-RS.x):0.1;if(kW<aW*0.55)issues.push({msg:'WIDEN STANCE MORE',sev:'warn'})}
+    if(!issues.length)issues.push({msg:'GOOD DEPTH - DRIVE UP!',sev:'good'})
+  }else if(kneeAng<160){issues.push({msg:'DESCENDING - BRACE CORE',sev:'warn'});grade='B'}
+  else issues.push({msg:'STANDING - BEGIN SQUAT',sev:'good'})
+  let a2=backAng;
+  if(variant==='sqpress'){const[S,E,W]=bestArm(lm);const ea=sa(S,E,W);if(ea&&ea>155&&kneeAng>155)issues.unshift({msg:'FULL REP - ARMS OVERHEAD!',sev:'good'});a2=ea}
+  return{valid:true,a1:kneeAng,a2:a2,issues,grade,reps:s.reps}
+}
+
+function analyzePushup(lm){
+  const[LS,RS,LE,RE,LW,RW,LH,RH,LA,RA]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16],lm[23],lm[24],lm[27],lm[28]];
+  const lv=(LS?.visibility??0)+(LE?.visibility??0),rv=(RS?.visibility??0)+(RE?.visibility??0);
+  const[S,E,W,H,A]=lv>=rv?[LS,LE,LW,LH,LA]:[RS,RE,RW,RH,RA];
+  if(!ok(S)||!ok(E))return{valid:false,msg:'POSITION SIDEWAYS TO CAMERA',grade:'?'};
+  const ea=sa(S,E,W)??160;
+  const sag=ok(H)&&ok(A)&&H.y>Math.max(S.y,A.y)+0.04;
+  const pike=ok(H)&&ok(A)&&H.y<Math.min(S.y,A.y)-0.06;
+  const s=repState[currentEx];
+  if(ea<92) tryEnterPhase(s,'down');
+  if(ea>152&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+  const issues=[];let grade='A';
+  if(sag){issues.push({msg:'ENGAGE CORE - HIPS SAGGING',sev:'bad'});grade='C'}
+  if(pike){issues.push({msg:'LOWER HIPS - BODY STRAIGHT',sev:'warn'});if(grade==='A')grade='B'}
+  if(!issues.length){
+    if(ea<98)issues.push({msg:'FULL DEPTH - DRIVE UP!',sev:'good'})
+    else if(ea<152)issues.push({msg:'GOING DOWN - CONTROLLED',sev:'warn'})
+    else issues.push({msg:'ARMS LOCKED - NEXT REP',sev:'good'})
+  }
+  return{valid:true,a1:ea,a2:null,issues,grade,reps:s.reps}
+}
+
+function analyzeCurl(lm){
+  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS)&&!ok(RS))return{valid:false,msg:'FACE CAMERA - ARMS VISIBLE',grade:'?'};
+  const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
+  const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
+  const ea=Math.min(LA,RA)===999?null:Math.round(Math.min(LA,RA));
+  if(!ea)return{valid:false,msg:'ELBOW NOT VISIBLE - ADJUST',grade:'?'};
+  const lD=ok(LS)&&ok(LE)&&Math.abs(LE.x-LS.x)>0.18;
+  const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
+  const s=repState[currentEx];
+  if(ea<55) tryEnterPhase(s,'up');
+  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const issues=[];let grade='A';
+  if(lD||rD){issues.push({msg:"ELBOWS IN - DON'T SWING",sev:'warn'});grade='B'}
+  if(!issues.length){
+    if(ea<55)issues.push({msg:'PEAK - SQUEEZE!',sev:'good'})
+    else if(ea<130)issues.push({msg:'CURLING - SLOW & CONTROLLED',sev:'warn'})
+    else issues.push({msg:'FULL EXTENSION - GREAT ROM',sev:'good'})
+  }
+  return{valid:true,a1:ea,a2:null,issues,grade,reps:s.reps}
+}
+
+function analyzeHinge(lm,variant){
+  const ta=torsoAngle(lm);
+  if(ta===null)return{valid:false,msg:'STAND SIDEWAYS TO CAMERA',grade:'?'};
+  const[S,E,W]=bestArm(lm);const ea=sa(S,E,W);
+  const s=repState[currentEx];const issues=[];let grade='A';
+  if(ta>82){issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!',sev:'bad'});grade='C'}
+  if(variant==='row'){
+    if(ta<22){issues.push({msg:'HINGE MORE - NEED 45 DEG LEAN',sev:'warn'});if(grade==='A')grade='B'}
+    if(ea!==null){
+      if(ea<72) tryEnterPhase(s,'up');
+      if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+      if(!issues.length){
+        if(ea<78)issues.push({msg:'TOP OF ROW - SQUEEZE BACK!',sev:'good'})
+        else if(ea<145)issues.push({msg:'ROW THE WEIGHT UP',sev:'warn'})
+        else issues.push({msg:'ARM EXTENDED - PULL!',sev:'good'})
+      }
+    }
+  }else{
+    if(ta>35) tryEnterPhase(s,'down');
+    if(ta<8&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+    if(!issues.length){
+      if(ta>35)issues.push({msg:'HINGED - DRIVE HIPS TO STAND',sev:'good'})
+      else issues.push({msg:'STANDING TALL - HINGE FORWARD',sev:'good'})
+    }
+  }
+  return{valid:true,a1:ta,a2:ea,issues,grade,reps:s.reps}
+}
+
+// ══════════════════════════════════════════════
+// MONDAY — CHEST & TRICEPS
+// ══════════════════════════════════════════════
+
+function analyzeFloorPress(lm, cg){
+  // Camera: SIDE.
+  // REP COUNTING — wrist vertical movement (more stable than elbow angle when lying down)
+  // When pressing up: wrist rises toward ceiling → wristElev increases
+  // When lowering:    elbows return to floor   → wristElev decreases
+  //
+  // wristElev = S.y - W.y  (positive = wrist higher than shoulder = arm pressing up)
+  // At BOTTOM (elbows on floor): wristElev ~0.02-0.06 (wrist barely above shoulder)
+  // At TOP    (arms extended):   wristElev ~0.20-0.30 (wrist well above shoulder)
+
+  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  const [S,E,W] = bestArm(lm);
+  if(!ok(S,.22)||!ok(W,.22)) return {valid:false, msg:'LIE DOWN - CAMERA FROM YOUR SIDE', grade:'?'};
+
+  // Primary rep signal: wrist elevation above shoulder
+  const wristElev = S.y - W.y;
+
+  // Secondary form signal: elbow angle (not used for rep counting, only form feedback)
+  const la = (ok(LS,.22)&&ok(LE,.22)&&ok(LW,.22)) ? calcAngle(LS,LE,LW) : 999;
+  const ra = (ok(RS,.22)&&ok(RE,.22)&&ok(RW,.22)) ? calcAngle(RS,RE,RW) : 999;
+  const ea = Math.round(la<ra && la<999 ? la : ra<999 ? ra : sa(S,E,W)??160);
+
+  // Form checks
+  const wristBehind = ok(W,.22)&&ok(E,.22) && (W.x - E.x) > 0.12;
+  const flare    = ok(LE,.22)&&ok(LS,.22) && Math.abs(LE.x - LS.x) > 0.28;
+  const cgFlare  = cg && ok(LE,.22)&&ok(RE,.22)&&ok(LS,.22)&&ok(RS,.22) &&
+                   Math.abs(LE.x-RE.x) > Math.abs(LS.x-RS.x)*0.7;
+
+  const s = repState[currentEx];
+  // BOTTOM: wrist near shoulder level — elbows back on floor
+  if(wristElev < 0.06) tryEnterPhase(s,'down');
+  // TOP: wrist well above shoulder — arm extended
+  if(wristElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(cgFlare)                  { issues.push({msg:'ELBOWS CLOSER - CLOSE GRIP PRESS',  sev:'warn'}); grade='B'; }
+  else if(flare && !cg)        { issues.push({msg:'ELBOWS SLIGHTLY TOO WIDE - ANGLE IN', sev:'warn'}); grade='B'; }
+  if(wristBehind)              { issues.push({msg:'WRISTS FORWARD - KEEP ABOVE ELBOWS', sev:'warn'}); if(grade==='A')grade='B'; }
+
+  if(!issues.length){
+    if(wristElev < 0.06)       issues.push({msg:'ELBOWS ON FLOOR - DRIVE UP HARD!',     sev:'good'});
+    else if(wristElev < 0.12)  issues.push({msg:cg?'ELBOWS CLOSE - PRESS':'LOWER UNTIL ELBOWS TOUCH FLOOR', sev:'warn'});
+    else if(wristElev < 0.18)  issues.push({msg:'PRESSING UP - EXTEND FULLY',           sev:'warn'});
+    else                       issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL',   sev:'good'});
+  }
+  // Show wristElev*100 as the HUD metric (more meaningful than raw elbow angle here)
+  return {valid:true, a1:Math.round(wristElev*100), a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeFloorFlye(lm){
+  // Camera: FRONT (switched from SIDE).
+  // With front camera, person is lying on back looking up at camera.
+  // Both arms clearly visible sweeping wide and coming together.
+  //
+  // REP COUNTING — wrist spread relative to shoulder width
+  // TOP  (arms together above chest): wrists close = spread ~ shoulder width
+  // BOTTOM (arms swept wide to floor): wrists wide apart = spread >> shoulder width
+  //
+  // spreadRatio = wristSpread / shoulderWidth
+  // TOP:    spreadRatio ~ 1.0-1.3
+  // BOTTOM: spreadRatio ~ 2.5-3.5 (arms swept wide)
+
+  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS,.25)&&!ok(RS,.25)) return {valid:false, msg:'LIE ON BACK - FACE CAMERA ABOVE YOU', grade:'?'};
+  if(!ok(LW,.22)&&!ok(RW,.22)) return {valid:false, msg:'BOTH WRISTS MUST BE VISIBLE', grade:'?'};
+
+  const shoulderW = ok(LS,.25)&&ok(RS,.25) ? Math.abs(LS.x - RS.x) : 0.15;
+  const wristW    = ok(LW,.22)&&ok(RW,.22) ? Math.abs(LW.x - RW.x) : shoulderW;
+  const spreadRatio = shoulderW > 0.02 ? wristW / shoulderW : 1;
+
+  // Elbow angle — must stay nearly straight (flye, not press)
+  const la = (ok(LS,.22)&&ok(LE,.22)&&ok(LW,.22)) ? calcAngle(LS,LE,LW) : 999;
+  const ra = (ok(RS,.22)&&ok(RE,.22)&&ok(RW,.22)) ? calcAngle(RS,RE,RW) : 999;
+  const elbowAng = Math.round(Math.min(la<999?la:999, ra<999?ra:999));
+  const validElbow = elbowAng < 999;
+  const doingPress = validElbow && elbowAng < 128;
+
+  // Asymmetry: left and right wrists should be at similar height (Y)
+  const asymmetry = ok(LW,.22)&&ok(RW,.22) ? Math.abs(LW.y - RW.y) : 0;
+  const isAsymmetric = asymmetry > 0.08;
+
+  const s = repState[currentEx];
+  // TOP:    arms together above chest — spreadRatio close to 1
+  if(spreadRatio < 1.4) tryEnterPhase(s,'down');
+  // BOTTOM: arms swept wide — spreadRatio large
+  if(spreadRatio > 2.2 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(doingPress)     { issues.push({msg:'STRAIGHTEN ARMS - FLYE NOT A PRESS',     sev:'warn'}); grade='B'; }
+  if(isAsymmetric)   { issues.push({msg:'KEEP BOTH ARMS EVEN - ONE SIDE HIGHER',  sev:'warn'}); if(grade==='A')grade='B'; }
+
+  if(!issues.length){
+    if(spreadRatio > 2.0)    issues.push({msg:'ARMS WIDE - SQUEEZE CHEST TO BRING TOGETHER', sev:'good'});
+    else if(spreadRatio > 1.4) issues.push({msg:'SWEEP ARMS WIDE - FEEL THE CHEST STRETCH', sev:'warn'});
+    else                       issues.push({msg:'ARMS TOGETHER - SLOWLY SWEEP OUT WIDE',    sev:'good'});
+  }
+  return {valid:true, a1:Math.round(spreadRatio*10)/10, a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzePushup(lm){
+  // Camera: SIDE. Full body must be visible.
+  const [LS,RS,LE,RE,LW,RW,LH,RH,LA,RA] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16],lm[23],lm[24],lm[27],lm[28]];
+  const lv=(LS?.visibility??0)+(LE?.visibility??0), rv=(RS?.visibility??0)+(RE?.visibility??0);
+  const [S,E,W,H,A] = lv>=rv ? [LS,LE,LW,LH,LA] : [RS,RE,RW,RH,RA];
+  if(!ok(S)||!ok(E)) return {valid:false, msg:'POSITION SIDEWAYS TO CAMERA', grade:'?'};
+
+  const ea = sa(S,E,W) ?? 160;
+
+  // Body alignment: shoulder → hip → ankle should form a straight line
+  // Compute deviation of hip from the S→A line
+  let bodyDev = 0;
+  if(ok(H,.3)&&ok(A,.3)){
+    // Vector from shoulder to ankle, measure how far hip deviates
+    const dx=A.x-S.x, dy=A.y-S.y;
+    const len=Math.sqrt(dx*dx+dy*dy)||1;
+    // Perpendicular distance of hip from S→A line
+    bodyDev = Math.abs((H.x-S.x)*dy - (H.y-S.y)*dx) / len;
+  }
+  const hipSag  = ok(H,.3)&&ok(A,.3) && H.y > Math.max(S.y,A.y)+0.045;
+  const hipPike = ok(H,.3)&&ok(A,.3) && H.y < Math.min(S.y,A.y)-0.055;
+
+  // Elbow flare: in push-up, elbows should be ~45° not splayed out
+  const elbowFlare = ok(LE,.3)&&ok(LS,.3) ? Math.abs(LE.x-LS.x)>0.25 : false;
+
+  const s = repState[currentEx];
+  // Require ea < 85° for full depth (chest near floor)
+  if(ea < 85) tryEnterPhase(s,'down');
+  if(ea > 152 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(hipSag)  { issues.push({msg:'CORE TIGHT - HIPS DROPPING TO FLOOR', sev:'bad'});  grade='C'; }
+  if(hipPike) { issues.push({msg:'LOWER HIPS - BODY MUST BE STRAIGHT',  sev:'warn'}); if(grade==='A')grade='B'; }
+  if(elbowFlare && !hipSag && !hipPike){ issues.push({msg:'ELBOWS 45 DEG - DO NOT FLARE OUT', sev:'warn'}); if(grade==='A')grade='B'; }
+
+  if(!issues.length){
+    if(ea < 90)       issues.push({msg:'CHEST NEAR FLOOR - PUSH BACK UP!', sev:'good'});
+    else if(ea < 152) issues.push({msg:'LOWER CHEST TO FLOOR - CONTROLLED', sev:'warn'});
+    else              issues.push({msg:'TOP POSITION - SQUEEZE CHEST', sev:'good'});
+  }
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeSkullCrusher(lm){
+  // Camera: SIDE. Person lies on back.
+  // KEY FORM RULE: upper arms must stay VERTICAL (pointing at ceiling).
+  // If upper arm drifts back → becomes a pullover, not skull crusher.
+  const [S,E,W] = bestArm(lm);
+  if(!ok(E,.22)) return {valid:false, msg:'LIE DOWN - CAMERA FROM YOUR SIDE', grade:'?'};
+
+  const ea = sa(S,E,W) ?? 160;
+
+  // Upper arm angle: angle between shoulder→elbow and the vertical axis
+  // When lying down, vertical = Y axis in image. Elbow should stay roughly
+  // above shoulder (elbow.y should be LESS than shoulder.y, i.e. higher up).
+  // If elbow drifts toward head (elbow.x moves toward head direction), upper arm is not vertical.
+  let upperArmDrift = false;
+  if(ok(S,.22)&&ok(E,.22)){
+    // When lying down, head is to one side. Check if elbow x drifts significantly
+    // beyond shoulder x in the head direction.
+    // Proxy: |elbow.x - shoulder.x| > threshold suggests upper arm is leaning back
+    upperArmDrift = Math.abs(E.x - S.x) > 0.18;
+  }
+
+  const s = repState[currentEx];
+  // Bottom: elbow bent, bar near head (ea < 70°)
+  if(ea < 70) tryEnterPhase(s,'down');
+  // Top: arm fully extended (ea > 155°)
+  if(ea > 155 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(upperArmDrift){
+    issues.push({msg:'UPPER ARMS DRIFTING - KEEP ELBOWS FIXED POINTING UP', sev:'warn'});
+    grade='B';
+  }
+  if(!issues.length){
+    if(ea < 75)       issues.push({msg:'BAR AT FOREHEAD - EXTEND ARMS UP!', sev:'good'});
+    else if(ea < 145) issues.push({msg:'BEND ELBOWS SLOWLY TOWARD HEAD', sev:'warn'});
+    else              issues.push({msg:'ARMS EXTENDED - LOWER SLOWLY', sev:'good'});
+  }
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeOHDTricepExt(lm){
+  // Camera: FRONT. Arms raised overhead, elbows bend behind head.
+  // KEY RULE: elbows must stay close to ears - pointing straight up.
+  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  const [S,E,W] = bestArm(lm);
+  if(!ok(E,.25)) return {valid:false, msg:'FACE CAMERA - RAISE ARMS OVERHEAD', grade:'?'};
+
+  const ea = sa(S,E,W) ?? 160;
+  const back = torsoAngle(lm) ?? 0;
+
+  // Elbow flare: compare elbow spread vs shoulder spread in normalised coords
+  // Good form: elbows should be no wider than shoulder width
+  let elbowFlare = false;
+  if(ok(LS,.3)&&ok(RS,.3)&&ok(LE,.3)&&ok(RE,.3)){
+    const shoulderW = Math.abs(LS.x - RS.x);
+    const elbowW    = Math.abs(LE.x - RE.x);
+    // Elbows wider than 110% of shoulder width = flaring
+    elbowFlare = elbowW > shoulderW * 1.1;
+  }
+
+  // Upper arm vertical: elbow should be near head/ear level when overhead
+  // Proxy: elbow Y should be close to nose Y (lm[0])
+  let elbowDropped = false;
+  const nose = lm[0];
+  if(ok(nose,.2)&&ok(LE,.3)&&ok(RE,.3)){
+    const avgElbowY = (LE.y + RE.y)/2;
+    // If average elbow Y is more than 0.2 below nose → elbows have dropped
+    elbowDropped = avgElbowY > nose.y + 0.18;
+  }
+
+  const s = repState[currentEx];
+  if(ea < 75) tryEnterPhase(s,'down');
+  if(ea > 155 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(back > 20)     { issues.push({msg:'STOP ARCHING BACK - BRACE YOUR CORE', sev:'bad'});  grade='C'; }
+  if(elbowFlare)    { issues.push({msg:'ELBOWS IN - POINT THEM AT THE CEILING', sev:'warn'}); if(grade==='A')grade='B'; }
+  if(elbowDropped)  { issues.push({msg:'RAISE ELBOWS HIGHER - KEEP THEM BY EARS', sev:'warn'}); if(grade==='A')grade='B'; }
+
+  if(!issues.length){
+    if(ea < 80)       issues.push({msg:'ARMS BENT - EXTEND STRAIGHT UP!', sev:'good'});
+    else if(ea < 145) issues.push({msg:'LOWER BEHIND HEAD - ELBOWS BY EARS', sev:'warn'});
+    else              issues.push({msg:'EXTENDED - LOWER WEIGHT BEHIND HEAD', sev:'good'});
+  }
+  return {valid:true, a1:ea, a2:back, issues, grade, reps:s.reps};
+}
+
+function analyzeOHDPress(lm){
+  const[S,E,W]=bestArm(lm);
+  if(!ok(S,.28)||!ok(E,.28))return{valid:false,msg:'FACE CAMERA - ARMS VISIBLE',grade:'?'};
+  const ea=sa(S,E,W)??160, back=torsoAngle(lm)??0;
+  const s=repState[currentEx];
+  if(ea<95) tryEnterPhase(s,'down');
+  if(ea>158&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+  const issues=[];let grade='A';
+  if(back>22){issues.push({msg:'STOP ARCHING BACK - BRACE CORE',sev:'bad'});grade='C'}
+  if(!issues.length){
+    if(ea>155)issues.push({msg:'LOCKED OUT - LOWER WITH CONTROL',sev:'good'})
+    else if(ea<95)issues.push({msg:'BOTTOM - PRESS IT!',sev:'good'})
+    else issues.push({msg:'PRESSING - CORE TIGHT',sev:'warn'})
+  }
+  return{valid:true,a1:ea,a2:back,issues,grade,reps:s.reps}
+}
+
+function analyzeLunge(lm){
+  const[LH,RH,LK,RK,LA,RA]=[lm[23],lm[24],lm[25],lm[26],lm[27],lm[28]];
+  if(!ok(LK)&&!ok(RK))return{valid:false,msg:'STEP BACK - FULL BODY VISIBLE',grade:'?'};
+  const laA=(ok(LH)&&ok(LK)&&ok(LA))?calcAngle(LH,LK,LA):180;
+  const raA=(ok(RH)&&ok(RK)&&ok(RA))?calcAngle(RH,RK,RA):180;
+  const ka=Math.round(Math.min(laA,raA)), back=torsoAngle(lm)??0;
+  const s=repState[currentEx];
+  if(ka<100) tryEnterPhase(s,'down');
+  if(ka>155&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+  const issues=[];let grade='A';
+  if(back>22){issues.push({msg:'CHEST UP - TORSO LEANING',sev:'warn'});grade='B'}
+  if(!issues.length){
+    if(ka<90)issues.push({msg:'GOOD DEPTH - DRIVE BACK UP',sev:'good'})
+    else if(ka<150)issues.push({msg:'STEP BACK AND LUNGE',sev:'warn'})
+    else issues.push({msg:'STANDING - STEP BACK',sev:'good'})
+  }
+  return{valid:true,a1:ka,a2:back,issues,grade,reps:s.reps}
+}
+
+function analyzeLateralRaise(lm){
+  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - UPPER BODY VISIBLE',grade:'?'};
+  const lE=ok(LE)?Math.max(0,LS.y-LE.y):0, rE=ok(RE)?Math.max(0,RS.y-RE.y):0;
+  const elev=Math.round(Math.max(lE,rE)*400);
+  const s=repState[currentEx];
+  if(elev>25) tryEnterPhase(s,'up');
+  if(elev<8&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const lA=sa(LS,LE,LW)??170, rA=sa(RS,RE,RW)??170;
+  const issues=[];let grade='A';
+  if(Math.min(lA,rA)<90){issues.push({msg:'SLIGHT BEND ONLY - NOT A ROW',sev:'warn'});grade='B'}
+  if(!issues.length){
+    if(elev>50)issues.push({msg:'GOOD HEIGHT - LOWER SLOWLY',sev:'good'})
+    else if(elev>20)issues.push({msg:'RAISING - LEAD WITH ELBOWS',sev:'warn'})
+    else issues.push({msg:'RAISE ARMS TO SHOULDER HEIGHT',sev:'good'})
+  }
+  return{valid:true,a1:elev,a2:null,issues,grade,reps:s.reps}
+}
+
+function analyzeFrontRaise(lm){
+  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  const S=ok(LS)?LS:RS, W=ok(LW)?LW:RW;
+  if(!ok(S,.28))return{valid:false,msg:'SIDE-ON TO CAMERA',grade:'?'};
+  const elev=Math.round(Math.max(0,S.y-(ok(W)?W.y:S.y))*400);
+  const s=repState[currentEx];
+  if(elev>30) tryEnterPhase(s,'up');
+  if(elev<8&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const issues=[];let grade='A';
+  if(!issues.length){
+    if(elev>50)issues.push({msg:'TOP - LOWER SLOWLY',sev:'good'})
+    else if(elev>20)issues.push({msg:'RAISE TO SHOULDER HEIGHT',sev:'warn'})
+    else issues.push({msg:'ARMS AT SIDE - RAISE FORWARD',sev:'good'})
+  }
+  return{valid:true,a1:elev,a2:null,issues,grade,reps:s.reps}
+}
+
+function analyzeUprightRow(lm){
+  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - UPPER BODY VISIBLE',grade:'?'};
+  const lH=ok(LE)?Math.max(0,LS.y-LE.y):0, rH=ok(RE)?Math.max(0,RS.y-RE.y):0;
+  const eh=Math.round(Math.max(lH,rH)*400);
+  const s=repState[currentEx];
+  if(eh>35) tryEnterPhase(s,'up');
+  if(eh<10&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const aboveWrist=(ok(LE)&&ok(LW))?LE.y<LW.y:((ok(RE)&&ok(RW))?RE.y<RW.y:true);
+  const issues=[];let grade='A';
+  if(!aboveWrist){issues.push({msg:'ELBOWS HIGHER THAN WRISTS',sev:'warn'});grade='B'}
+  if(!issues.length){
+    if(eh>50)issues.push({msg:'TOP OF ROW - HOLD A BEAT!',sev:'good'})
+    else if(eh>25)issues.push({msg:'PULL - ELBOWS LEAD',sev:'warn'})
+    else issues.push({msg:'ARMS DOWN - PULL UP',sev:'good'})
+  }
+  return{valid:true,a1:eh,a2:null,issues,grade,reps:s.reps}
+}
+
+function analyzeShrug(lm){
+  const[LS,RS]=[lm[11],lm[12]];
+  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - SHOULDERS VISIBLE',grade:'?'};
+  const asym=Math.round(Math.abs(LS.y-RS.y)*400);
+  const nose=lm[0], avgS=(LS.y+RS.y)/2;
+  const ed=ok(nose,.2)?Math.round(Math.abs(avgS-nose.y)*400):60;
+  const s=repState[currentEx];
+  // ed small = shoulders near nose = fully shrugged. Require clear shrug (ed<26) before counting return.
+  if(ed<26) tryEnterPhase(s,'up');
+  if(ed>62&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const issues=[];let grade='A';
+  if(asym>18){issues.push({msg:'EVEN OUT - SHOULDERS UNEVEN',sev:'warn'});grade='B'}
+  if(!issues.length){
+    if(ed<26)issues.push({msg:'SHRUGGED - HOLD & SQUEEZE TRAPS!',sev:'good'})
+    else if(ed<50)issues.push({msg:'SHRUGGING UP - EARS TO SHOULDERS',sev:'warn'})
+    else issues.push({msg:'RELAXED - SHRUG STRAIGHT UP',sev:'good'})
+  }
+  return{valid:true,a1:ed,a2:asym,issues,grade,reps:s.reps}
+}
+
+function analyzeTricepKickback(lm){
+  const ta=torsoAngle(lm);
+  if(ta===null)return{valid:false,msg:'SIDE-ON TO CAMERA - HINGE FORWARD',grade:'?'};
+  const[S,E,W]=bestArm(lm);const ea=sa(S,E,W)??90;
+  const s=repState[currentEx];
+  if(ea>155) tryEnterPhase(s,'up');
+  if(ea<60&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const issues=[];let grade='A';
+  if(ta<28){issues.push({msg:'LEAN MORE FORWARD - TORSO PARALLEL',sev:'warn'});grade='B'}
+  if(!issues.length){
+    if(ea>155)issues.push({msg:'FULL EXTENSION - SQUEEZE TRICEP!',sev:'good'})
+    else if(ea<70)issues.push({msg:'ARM BENT - KICK BACK!',sev:'warn'})
+    else issues.push({msg:'EXTEND FULLY',sev:'warn'})
+  }
+  return{valid:true,a1:ea,a2:ta,issues,grade,reps:s.reps}
+}
+
+function analyzeCalfRaise(lm){
+  const back=torsoAngle(lm)??0;
+  const[LS,RS]=[lm[11],lm[12]];
+  if(!ok(LS,.28)&&!ok(RS,.28))return{valid:false,msg:'STAND SIDEWAYS TO CAMERA',grade:'?'};
+  // Calf raise: ankle extension isn't reliably tracked by MediaPipe.
+  // We only check posture quality; use the ↺ RESET button to count sets manually.
+  const issues=[];let grade='A';
+  if(back>12){issues.push({msg:'STAND TALL - AVOID LEANING FORWARD',sev:'warn'});grade='B'}
+  else issues.push({msg:'RISE ON TOES - FULL RANGE OF MOTION',sev:'good'})
+  return{valid:true,a1:back,a2:null,issues,grade,reps:repState[currentEx].reps}
+}
+
+function analyzeRenegadeRow(lm){
+  const[LS,RS,LE,RE,LW,RW,LH,RH,LA,RA]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16],lm[23],lm[24],lm[27],lm[28]];
+  const lv=(LS?.visibility??0)+(LE?.visibility??0),rv=(RS?.visibility??0)+(RE?.visibility??0);
+  const[S,E,W,H,A]=lv>=rv?[LS,LE,LW,LH,LA]:[RS,RE,RW,RH,RA];
+  if(!ok(S,.22)||!ok(H,.22))return{valid:false,msg:'SIDE-ON TO CAMERA - PLANK POSITION',grade:'?'};
+  const ea=sa(S,E,W)??160;
+  const sag=ok(H)&&ok(A)&&H.y>Math.max(S.y,A.y)+0.04;
+  const pike=ok(H)&&ok(A)&&H.y<Math.min(S.y,A.y)-0.06;
+  const s=repState[currentEx];
+  if(ea<80) tryEnterPhase(s,'up');
+  if(ea>150&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
+  const issues=[];let grade='A';
+  if(sag){issues.push({msg:'CORE TIGHT - HIPS DROPPING',sev:'bad'});grade='C'}
+  if(pike){issues.push({msg:'LOWER HIPS - STAY LEVEL',sev:'warn'});if(grade==='A')grade='B'}
+  if(!issues.length){
+    if(ea<80)issues.push({msg:'ROW AT TOP - SQUEEZE BACK!',sev:'good'})
+    else if(ea<145)issues.push({msg:'PULLING - HIPS STAY LEVEL',sev:'warn'})
+    else issues.push({msg:'PLANK READY - ROW THE WEIGHT',sev:'good'})
+  }
+  return{valid:true,a1:ea,a2:null,issues,grade,reps:s.reps}
+}
+
+function analyzePosture(lm){
+  const[LS,RS]=[lm[11],lm[12]];
+  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - FULL BODY VISIBLE',grade:'?'};
+  const back=torsoAngle(lm)??0, asym=Math.round(Math.abs(LS.y-RS.y)*400);
+  const issues=[];let grade='A';
+  if(back>15){issues.push({msg:'STAND TALL - DO NOT LEAN',sev:'warn'});grade='B'}
+  if(asym>20){issues.push({msg:'LEVEL SHOULDERS - EVEN LOAD',sev:'warn'});if(grade==='A')grade='B'}
+  if(!issues.length)issues.push({msg:'GREAT POSTURE - KEEP WALKING',sev:'good'})
+  return{valid:true,a1:back,a2:asym,issues,grade,reps:repState[currentEx].reps}
+}
+
+// EXERCISE CONFIG MAP
+const EX_CFG={
+  floor_press:  {fn:lm=>analyzeFloorPress(lm,false),  a1:'WRIST ELEV', a2:null},
+  floor_flye:   {fn:analyzeFloorFlye,                  a1:'ARM SPREAD', a2:null},
+  pushup:       {fn:analyzePushup,                     a1:'ELBOW ANG', a2:null},
+  skull_crusher:{fn:analyzeSkullCrusher,               a1:'ELBOW ANG', a2:null},
+  ohd_tri_ext:  {fn:analyzeOHDTricepExt,              a1:'ELBOW ANG', a2:'BACK DEG'},
+  bent_row:     {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG', a2:'ELBOW ANG'},
+  single_row:   {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG', a2:'ELBOW ANG'},
+  stiff_rdl:    {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG', a2:null},
+  hammer_curl:  {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
+  conc_curl:    {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
+  goblet_sq:    {fn:lm=>analyzeSquat(lm,'goblet'),     a1:'KNEE ANG',  a2:'BACK DEG'},
+  rom_dl:       {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG', a2:null},
+  rev_lunge:    {fn:analyzeLunge,                      a1:'KNEE ANG',  a2:'TORSO DEG'},
+  sumo_sq:      {fn:lm=>analyzeSquat(lm,'sumo'),       a1:'KNEE ANG',  a2:'BACK DEG'},
+  calf_raise:   {fn:analyzeCalfRaise,                  a1:'BODY LEAN', a2:null},
+  ohd_press:    {fn:analyzeOHDPress,                   a1:'ELBOW ANG', a2:'BACK DEG'},
+  lat_raise:    {fn:analyzeLateralRaise,               a1:'ARM HEIGHT',a2:null},
+  front_raise:  {fn:analyzeFrontRaise,                 a1:'ARM HEIGHT',a2:null},
+  upright_row:  {fn:analyzeUprightRow,                 a1:'ELB HEIGHT',a2:null},
+  shrug:        {fn:analyzeShrug,                      a1:'ELEVATION', a2:'ASYMMETRY'},
+  db_curl:      {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
+  incline_curl: {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
+  hammer_curl2: {fn:analyzeCurl,                       a1:'ELBOW ANG', a2:null},
+  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'WRIST ELEV', a2:null},
+  tri_kick:     {fn:analyzeTricepKickback,              a1:'ELBOW ANG', a2:'TORSO DEG'},
+  sq_press:     {fn:lm=>analyzeSquat(lm,'sqpress'),    a1:'KNEE ANG',  a2:'ELBOW ANG'},
+  deadlift:     {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG', a2:null},
+  push_press:   {fn:analyzeOHDPress,                   a1:'ELBOW ANG', a2:'BACK DEG'},
+  renegade_row: {fn:analyzeRenegadeRow,                 a1:'ELBOW ANG', a2:null},
+  farmers_carry:{fn:analyzePosture,                    a1:'BODY LEAN', a2:'SHLDR ASYM'},
+};
+
+// ════════════════════════════════════════════════
+// GATE STATE MACHINE
+// States: IDLE → POSITIONING → COUNTDOWN → ACTIVE
+// ════════════════════════════════════════════════
+
+const GATE = {
+  state: 'IDLE',      // 'IDLE' | 'POSITIONING' | 'COUNTDOWN' | 'ACTIVE'
+  stableFrames: 0,    // consecutive frames body has been stable + in position
+  countdownStart: 0,  // timestamp when countdown began
+  posHistory: [],     // rolling shoulder-midpoint positions for stability check
+  STABLE_NEEDED: 45,  // ~1.5s at 30fps (Option C — stability gate)
+  CD_MS: 3000,        // 3 second countdown (Option A)
+};
+
+function resetGate(){
+  GATE.state = 'IDLE';
+  GATE.stableFrames = 0;
+  GATE.countdownStart = 0;
+  GATE.posHistory = [];
+  const ov = document.getElementById('gate-overlay');
+  ov.style.display = 'none';
+  const bar = document.getElementById('gate-bar');
+  bar.style.width = '0%';
+  bar.className = 'gate-bar positioning';
+}
+
+// Option C — stability: shoulder midpoint must be still for ~1.5s
+function isBodyStable(lm){
+  const ls=lm[11], rs=lm[12];
+  if(!ok(ls,.3)||!ok(rs,.3)) return false;
+  const mx=(ls.x+rs.x)/2, my=(ls.y+rs.y)/2;
+  GATE.posHistory.push({x:mx,y:my});
+  if(GATE.posHistory.length>30) GATE.posHistory.shift();
+  if(GATE.posHistory.length<12) return false;
+  const ax=GATE.posHistory.reduce((s,p)=>s+p.x,0)/GATE.posHistory.length;
+  const ay=GATE.posHistory.reduce((s,p)=>s+p.y,0)/GATE.posHistory.length;
+  const maxDev=Math.max(...GATE.posHistory.map(p=>Math.abs(p.x-ax)+Math.abs(p.y-ay)));
+  return maxDev < 0.028; // normalised coords — must be quite still
+}
+
+// Option A — per-exercise start-position check
+// Returns {pass:bool, hint:string}
+function readyCheck(id, lm){
+  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  const [LH,RH,LK,RK,LA,RA] = [lm[23],lm[24],lm[25],lm[26],lm[27],lm[28]];
+
+  // Floor exercises — just need body visible, can't check lying posture
+  const FLOOR = new Set(['floor_press','floor_flye','pushup','skull_crusher','floor_cg','renegade_row','incline_curl']);
+  if(FLOOR.has(id)){
+    if(!ok(LS,.28)&&!ok(RS,.28)) return {pass:false,hint:'CAMERA MUST SEE YOUR UPPER BODY'};
+    return {pass:true, hint:'POSITION DETECTED — HOLD STILL'};
+  }
+
+  // Hinge/side-camera exercises — standing upright to start
+  const HINGE = new Set(['bent_row','single_row','stiff_rdl','rom_dl','deadlift','tri_kick','front_raise','calf_raise']);
+  if(HINGE.has(id)){
+    const ta=torsoAngle(lm);
+    if(ta===null) return {pass:false, hint:'STAND SIDEWAYS TO CAMERA'};
+    if(ta>20) return {pass:false, hint:'STAND UPRIGHT — BACK STRAIGHT'};
+    return {pass:true, hint:'STANDING POSITION CONFIRMED'};
+  }
+
+  // All front-camera standing exercises
+  if(!ok(LS,.3)&&!ok(RS,.3)) return {pass:false, hint:'STEP BACK — FULL BODY MUST BE VISIBLE'};
+
+  // Torso must be upright
+  const ta=torsoAngle(lm)??99;
+  if(ta>20) return {pass:false, hint:'STAND UPRIGHT — STOP LEANING'};
+
+  // Arms must be relaxed at sides (elbows not raised above shoulders)
+  const lArmOk = !ok(LE,.3) || (LE.y >= (LS?.y??1) - 0.04);
+  const rArmOk = !ok(RE,.3) || (RE.y >= (RS?.y??1) - 0.04);
+  if(!lArmOk||!rArmOk) return {pass:false, hint:'LOWER YOUR ARMS — STAND RELAXED'};
+
+  // Squat family: legs must be straight (not mid-squat)
+  const SQ = new Set(['goblet_sq','sumo_sq','sq_press','rev_lunge']);
+  if(SQ.has(id)){
+    const hM=ok(LH)&&ok(RH)?mid(LH,RH):(ok(LH)?LH:RH);
+    const kM=ok(LK)&&ok(RK)?mid(LK,RK):(ok(LK)?LK:RK);
+    const aM=ok(LA)&&ok(RA)?mid(LA,RA):(ok(LA)?LA:RA);
+    if(ok(hM,.28)&&ok(kM,.28)&&ok(aM,.28)){
+      const ka=calcAngle(hM,kM,aM);
+      if(ka<155) return {pass:false, hint:'STAND TALL — LEGS FULLY STRAIGHT'};
+    }
+  }
+
+  // Curl family: arms must be hanging down (not pre-curled)
+  const CURL = new Set(['db_curl','hammer_curl','hammer_curl2','conc_curl']);
+  if(CURL.has(id)){
+    const la=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):180;
+    const ra=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):180;
+    const minA=Math.min(la,ra);
+    if(minA<140) return {pass:false, hint:'STRAIGHTEN ARMS — HANG THEM DOWN'};
+  }
+
+  return {pass:true, hint:'POSITION CONFIRMED — HOLD STILL'};
+}
+
+// Draw countdown ring + number on canvas during COUNTDOWN state
+function drawCountdownRing(progress, secLeft){
+  const cx=canvas.width/2, cy=canvas.height*0.42;
+  const r=Math.min(canvas.width,canvas.height)*0.1;
+  // Background disc
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.88)'; ctx.fill();
+  ctx.strokeStyle='rgba(0,102,255,0.12)'; ctx.lineWidth=3; ctx.stroke();
+  // Progress arc (blue sweep)
+  ctx.beginPath();
+  ctx.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+(Math.PI*2*progress));
+  ctx.strokeStyle='rgba(0,102,255,0.9)'; ctx.lineWidth=6;
+  ctx.lineCap='round'; ctx.stroke();
+  // Number
+  ctx.font=`bold ${Math.round(r*1.1)}px 'Orbitron',monospace`;
+  ctx.fillStyle='#0066ff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(secLeft>0?String(secLeft):'▶', cx, cy);
+  ctx.textBaseline='alphabetic';
+}
+
+// Called every frame from onResults — returns true only when ACTIVE
+function runGate(lm){
+  const ov   = document.getElementById('gate-overlay');
+  const pill = document.getElementById('gate-pill');
+  const bar  = document.getElementById('gate-bar');
+
+  // Already active — skip gate entirely
+  if(GATE.state==='ACTIVE') return true;
+
+  ov.style.display='flex';
+
+  // ── IDLE → start positioning ─────────────
+  if(GATE.state==='IDLE') GATE.state='POSITIONING';
+
+  // ── POSITIONING ──────────────────────────
+  if(GATE.state==='POSITIONING'){
+    const chk = readyCheck(currentEx, lm);
+    const stable = isBodyStable(lm);
+
+    if(!chk.pass){
+      // Reset accumulation if position broken
+      GATE.stableFrames=0; GATE.posHistory=[];
+      pill.className='gate-pill warn';
+      pill.textContent=chk.hint;
+      bar.style.width='0%'; bar.className='gate-bar positioning';
+      return false;
+    }
+    if(!stable){
+      GATE.stableFrames=0;
+      pill.className='gate-pill warn';
+      pill.textContent='HOLD STILL — CHECKING STABILITY';
+      bar.style.width='0%'; bar.className='gate-bar positioning';
+      return false;
+    }
+
+    // Position correct + stable — accumulate
+    GATE.stableFrames++;
+    const pct=Math.min(100,Math.round((GATE.stableFrames/GATE.STABLE_NEEDED)*100));
+    bar.style.width=pct+'%'; bar.className='gate-bar positioning';
+    pill.className='gate-pill warn';
+    pill.textContent='HOLD POSITION — '+pct+'%';
+
+    if(GATE.stableFrames>=GATE.STABLE_NEEDED){
+      // Confirmed — start countdown
+      GATE.state='COUNTDOWN';
+      GATE.countdownStart=Date.now();
+      pill.className='gate-pill go';
+      pill.textContent='POSITION CONFIRMED ✓';
+      bar.className='gate-bar countdown';
+      // Voice announcement
+      if(voiceOn){
+        window.speechSynthesis.cancel();
+        const u=new SpeechSynthesisUtterance('Position confirmed. Starting in 3. 2. 1.');
+        u.rate=0.9; u.pitch=0.95; u.volume=1;
+        window.speechSynthesis.speak(u);
+      }
+    }
+    return false;
+  }
+
+  // ── COUNTDOWN ────────────────────────────
+  if(GATE.state==='COUNTDOWN'){
+    const elapsed=Date.now()-GATE.countdownStart;
+    const remaining=GATE.CD_MS-elapsed;
+    const progress=Math.min(1,elapsed/GATE.CD_MS);
+    const secLeft=Math.ceil(remaining/1000);
+
+    // If position breaks during countdown → restart
+    const chk=readyCheck(currentEx,lm);
+    if(!chk.pass){
+      GATE.state='POSITIONING'; GATE.stableFrames=0; GATE.posHistory=[];
+      window.speechSynthesis.cancel();
+      pill.className='gate-pill warn';
+      pill.textContent='POSITION BROKEN — RETURN TO START';
+      bar.style.width='0%'; bar.className='gate-bar positioning';
+      if(voiceOn) trySpeak('Position broken. Return to start position.');
+      return false;
+    }
+
+    drawCountdownRing(progress, secLeft);
+    bar.style.width=Math.round(progress*100)+'%';
+    pill.className='gate-pill go';
+    pill.textContent='STARTING IN  '+Math.max(1,secLeft)+'…';
+
+    if(remaining<=0){
+      // GO!
+      GATE.state='ACTIVE';
+      ov.style.display='none';
+      if(voiceOn){
+        window.speechSynthesis.cancel();
+        const u=new SpeechSynthesisUtterance('Go!');
+        u.rate=1.1; u.pitch=1.15; u.volume=1;
+        window.speechSynthesis.speak(u);
+      }
+      setFeedback('GO — REP COUNTING IS NOW ACTIVE','good','🟢');
+    }
+    return false;
+  }
+
+  return false;
+}
+
+// ════════════════════════════════════════════════
+// CONTINUOUS EXERCISE CONTEXT VALIDATOR
+// Runs every frame during ACTIVE state.
+// If body posture doesn't match selected exercise → block counting + warn.
+// ════════════════════════════════════════════════
+
+const FLOOR_EX    = new Set(['floor_press','floor_flye','skull_crusher','floor_cg','pushup','renegade_row','incline_curl']);
+const STANDING_EX = new Set(['db_curl','hammer_curl','hammer_curl2','conc_curl','ohd_press','ohd_tri_ext','lat_raise','upright_row','shrug','goblet_sq','sumo_sq','rev_lunge','sq_press','push_press','farmers_carry','calf_raise','front_raise']);
+const HINGE_EX    = new Set(['bent_row','single_row','stiff_rdl','rom_dl','deadlift','tri_kick']);
+
+// Smoothed standing check — require 8 consecutive frames to avoid flickering warnings
+let ctxFailFrames = 0;
+let ctxPassFrames = 0;
+const CTX_FAIL_NEEDED = 5; // frames of wrong posture before showing warning
+const CTX_PASS_NEEDED = 4; // frames of correct posture to clear warning
+let ctxWarningActive  = false;
+
+function validateExerciseContext(exId, lm){
+  const [LS,RS,LH,RH] = [lm[11],lm[12],lm[23],lm[24]];
+  const ta = torsoAngle(lm); // 0=upright, ~90=horizontal
+
+  // ── FLOOR exercises: person must NOT be standing upright ──
+  if(FLOOR_EX.has(exId)){
+    if(ta !== null && ta < 35 && (ok(LH,.32)||ok(RH,.32))){
+      const msg = (exId==='pushup'||exId==='renegade_row')
+        ? 'GET INTO PLANK — ' + getExLabel(exId).toUpperCase() + ' IS A FLOOR EXERCISE'
+        : 'LIE DOWN — ' + getExLabel(exId).toUpperCase() + ' IS A FLOOR EXERCISE';
+      return debounceCtx(false, msg);
+    }
+    return debounceCtx(true, '');
+  }
+
+  // ── STANDING exercises: person must NOT be horizontal ──
+  if(STANDING_EX.has(exId)){
+    if(ta !== null && ta > 50){
+      return debounceCtx(false, 'STAND UP — ' + getExLabel(exId) + ' IS A STANDING EXERCISE');
+    }
+    // Also catch if someone is lying (shoulder Y ≈ hip Y when lying down)
+    if(ok(LS,.3)&&ok(LH,.3)){
+      const yDiff = Math.abs(LS.y - LH.y);
+      if(yDiff < 0.12){
+        return debounceCtx(false, 'STAND UP — ' + getExLabel(exId) + ' IS A STANDING EXERCISE');
+      }
+    }
+    return debounceCtx(true, '');
+  }
+
+  // ── HINGE exercises: person must be leaning forward ──
+  if(HINGE_EX.has(exId)){
+    if(ta !== null && ta < 15){
+      return debounceCtx(false, 'HINGE FORWARD — GET INTO ' + getExLabel(exId) + ' POSITION');
+    }
+    return debounceCtx(true, '');
+  }
+
+  return debounceCtx(true, ''); // unknown exercise — pass through
+}
+
+// Debounce to avoid flickering on/off every frame
+function debounceCtx(passes, hint){
+  if(passes){
+    ctxPassFrames++;
+    ctxFailFrames = 0;
+    if(ctxWarningActive && ctxPassFrames >= CTX_PASS_NEEDED){
+      ctxWarningActive = false;
+    }
+  } else {
+    ctxFailFrames++;
+    ctxPassFrames = 0;
+    if(ctxFailFrames >= CTX_FAIL_NEEDED){
+      ctxWarningActive = true;
+    }
+  }
+  if(ctxWarningActive && !passes) return {pass:false, hint};
+  return {pass:true, hint:''};
+}
+
+function getExLabel(exId){
+  for(const d of Object.values(WORKOUT)){
+    const f=d.exercises.find(e=>e.id===exId);
+    if(f) return f.label;
+  }
+  return exId;
+}
+
+// Reset context debounce on exercise switch
+function resetCtxCheck(){
+  ctxFailFrames=0; ctxPassFrames=0; ctxWarningActive=false;
+}
+
+// ════════════════════════════════════════════════
+// SKELETON DRAWING — Exercise-Specific Highlighting
+// Primary bones glow bright; secondary bones are dim.
+// ════════════════════════════════════════════════
+
+const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[27,31],[24,26],[26,28],[28,32],[0,11],[0,12]];
+const JOINTS=[0,11,12,13,14,15,16,23,24,25,26,27,28];
+
+// Bone pairs by muscle group
+const BG = {
+  arms:     new Set(['11-13','13-15','12-14','14-16']),
+  shoulders:new Set(['11-12','0-11','0-12']),
+  torso:    new Set(['11-23','12-24','23-24']),
+  legs:     new Set(['23-25','25-27','27-31','24-26','26-28','28-32']),
+};
+
+// Joints by group
+const JG = {
+  arms:     new Set([11,12,13,14,15,16]),
+  shoulders:new Set([0,11,12]),
+  torso:    new Set([11,12,23,24]),
+  legs:     new Set([23,24,25,26,27,28]),
+};
+
+// Which groups are PRIMARY for each exercise
+const EX_PRIMARY = {
+  // ── Monday: Chest & Triceps ──────────────────
+  floor_press:   ['arms','shoulders'],
+  floor_flye:    ['arms','shoulders'],
+  pushup:        ['arms','torso'],
+  skull_crusher: ['arms'],
+  ohd_tri_ext:   ['arms','shoulders'],
+  // ── Tuesday: Back & Biceps ───────────────────
+  bent_row:      ['arms','torso'],
+  single_row:    ['arms','torso'],
+  stiff_rdl:     ['torso','legs'],
+  hammer_curl:   ['arms'],
+  conc_curl:     ['arms'],
+  // ── Wednesday: Legs & Glutes ─────────────────
+  goblet_sq:     ['legs','torso'],
+  rom_dl:        ['torso','legs'],
+  rev_lunge:     ['legs','torso'],
+  sumo_sq:       ['legs','torso'],
+  calf_raise:    ['legs'],
+  // ── Thursday: Shoulders & Traps ──────────────
+  ohd_press:     ['arms','shoulders'],
+  lat_raise:     ['arms','shoulders'],
+  front_raise:   ['arms','shoulders'],
+  upright_row:   ['arms','shoulders'],
+  shrug:         ['shoulders','torso'],
+  // ── Friday: Arms ─────────────────────────────
+  db_curl:       ['arms'],
+  incline_curl:  ['arms'],
+  hammer_curl2:  ['arms'],
+  floor_cg:      ['arms','shoulders'],
+  tri_kick:      ['arms','torso'],
+  // ── Saturday: Full Body ──────────────────────
+  sq_press:      ['arms','legs','torso','shoulders'],
+  deadlift:      ['torso','legs'],
+  push_press:    ['arms','shoulders','legs'],
+  renegade_row:  ['arms','torso'],
+  farmers_carry: ['arms','torso','legs'],
+};
+
+function getPrimarySet(exId){
+  const groups = EX_PRIMARY[exId] || [];
+  const boneSet = new Set();
+  const jointSet = new Set();
+  groups.forEach(g=>{
+    if(BG[g]) BG[g].forEach(b=>boneSet.add(b));
+    if(JG[g]) JG[g].forEach(j=>jointSet.add(j));
+  });
+  return {boneSet, jointSet};
+}
+
+function drawSkeleton(lm){
+  const {boneSet, jointSet} = getPrimarySet(currentEx);
+  const hasPrimary = boneSet.size > 0;
+
+  // Draw dim secondary bones first
+  BONES.forEach(([i,j])=>{
+    if(!ok(lm[i],.26)||!ok(lm[j],.26))return;
+    const key=i+'-'+j;
+    const isPrimary = !hasPrimary || boneSet.has(key);
+    if(isPrimary) return; // draw primary on top
+    const a=px(lm[i]),b=px(lm[j]);
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+    ctx.strokeStyle='rgba(180,190,210,0.25)';
+    ctx.lineWidth=1.5;ctx.stroke();
+  });
+
+  // Draw bright primary bones on top
+  BONES.forEach(([i,j])=>{
+    if(!ok(lm[i],.26)||!ok(lm[j],.26))return;
+    const key=i+'-'+j;
+    const isPrimary = !hasPrimary || boneSet.has(key);
+    if(!isPrimary) return;
+    const a=px(lm[i]),b=px(lm[j]);
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+    ctx.strokeStyle='rgba(0,102,255,0.9)';
+    ctx.lineWidth=3.5;ctx.stroke();
+  });
+
+  // Draw joints — primary = large red, secondary = small grey
+  JOINTS.forEach(i=>{
+    if(!ok(lm[i],.3))return;
+    const {x,y}=px(lm[i]);
+    const isPrimary = !hasPrimary || jointSet.has(i);
+    if(isPrimary){
+      ctx.beginPath();ctx.arc(x,y,6,0,Math.PI*2);
+      ctx.fillStyle='rgba(232,0,42,0.85)';ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.95)';ctx.lineWidth=2;ctx.stroke();
+    } else {
+      ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);
+      ctx.fillStyle='rgba(180,190,210,0.35)';ctx.fill();
+    }
+  });
+}
+
+function drawTag(idxArr,val,unit,sev){
+  if(val===null||val===undefined||!lmCache.length)return;
+  const pts=idxArr.map(i=>lmCache[i]).filter(p=>ok(p,.26));
+  if(!pts.length)return;
+  const cx=pts.reduce((s,p)=>s+(1-p.x)*canvas.width,0)/pts.length;
+  const cy=pts.reduce((s,p)=>s+p.y*canvas.height,0)/pts.length-16;
+  const col=sev==='bad'?'#ff3355':sev==='warn'?'#ffaa00':'#00ff88';
+  const label=val+(unit||'°');
+  ctx.font='bold 11px "Share Tech Mono",monospace';ctx.textAlign='center';
+  const w=ctx.measureText(label).width+10;
+  ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(cx-w/2,cy-13,w,17);
+  ctx.fillStyle=col;ctx.fillText(label,cx,cy);
+}
+
+// MAIN FRAME HANDLER
+function onResults(results){
+  if(video.videoWidth)canvas.width=video.videoWidth;
+  if(video.videoHeight)canvas.height=video.videoHeight;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const dot=document.getElementById('live-dot'),stx=document.getElementById('status-txt');
+  if(!results.poseLandmarks){
+    dot.className='live-dot on';stx.textContent='NO POSE';
+    setFeedback('NO POSE - STEP INTO FRAME','warn','👁️');
+    // Reset gate if we lose the body
+    if(GATE.state!=='IDLE'&&GATE.state!=='ACTIVE') resetGate();
+    return;
+  }
+  lmCache=results.poseLandmarks;dot.className='live-dot analyzing';stx.textContent='ANALYZING';
+  drawSkeleton(lmCache);
+
+  const cfg=EX_CFG[currentEx]; if(!cfg) return;
+
+  // ── RUN GATE — only proceed to rep counting when ACTIVE ──
+  const gateOpen = runGate(lmCache);
+  if(!gateOpen){
+    // Still show live angle tags but don't count reps
+    const r=cfg.fn(lmCache);
+    if(r.valid){
+      updateHUDAnglesOnly(r,cfg);
+      if(GATE.state==='POSITIONING'||GATE.state==='COUNTDOWN'){
+        stx.textContent=GATE.state;
+      }
+    }
+    return;
+  }
+
+  // Gate open — full analysis + rep counting
+  stx.textContent='ACTIVE';
+
+  // ── Continuous exercise context check ──
+  // Even in ACTIVE state, verify the person is in the correct posture
+  // for the selected exercise. If not, block rep counting and warn them.
+  const ctxCheck = validateExerciseContext(currentEx, lmCache);
+  if(!ctxCheck.pass){
+    setFeedback(ctxCheck.hint, 'bad', '❌');
+    trySpeak(ctxCheck.hint);
+    return; // skip analyzer entirely — no rep counting
+  }
+
+  const r=cfg.fn(lmCache);
+  if(!r.valid){setFeedback(r.msg,'warn','👁️');return}
+  // Capture primary angle for fatigue depth tracking (read by countRep)
+  fatigueAngleCapture = r.a1;
+  // Draw tags
+  const sqFamily=['goblet_sq','sumo_sq','sq_press','rev_lunge'];
+  if(['pushup','floor_press','floor_flye','skull_crusher','ohd_tri_ext','ohd_press','push_press','floor_cg'].includes(currentEx))
+    drawTag([13,14],r.a1,'°',r.a1<80?'good':r.a1<140?'warn':'good');
+  else if(['db_curl','hammer_curl','hammer_curl2','conc_curl','incline_curl','tri_kick','renegade_row'].includes(currentEx))
+    drawTag([13,14],r.a1,'°',r.a1<60?'good':r.a1<130?'warn':'good');
+  else if(['bent_row','single_row','stiff_rdl','rom_dl','deadlift'].includes(currentEx))
+    drawTag([23,24],r.a1,'°',r.a1>70?'bad':r.a1>35?'warn':'good');
+  else if(sqFamily.includes(currentEx)||currentEx==='goblet_sq')
+    drawTag([25,26],r.a1,'°',r.a1<90?'bad':r.a1<120?'warn':'good');
+  updateHUD(r,cfg);
+}
+
+function updateHUD(r,cfg){
+  document.getElementById('h-reps').textContent=r.reps??0;
+  updateHUDAnglesOnly(r,cfg);
+  const g=document.getElementById('h-grade');
+  g.textContent=r.grade||'-';
+  g.className='card-val grade grade-'+(r.grade||'A');
+
+  // ── Fatigue tracking ──
+  const fc=getFatigueContext(currentEx);
+  updatePaceHUD(fc);
+  checkRuleBasedFatigue(fc);
+
+  // ── Claude AI coaching (fires async, never blocks) ──
+  if(apiKey && GATE.state==='ACTIVE'){
+    let exLabel=currentEx;
+    for(const d of Object.values(WORKOUT)){
+      const f=d.exercises.find(e=>e.id===currentEx);
+      if(f){exLabel=f.label;break}
+    }
+    callClaude(exLabel, r);
+  }
+
+  // ── Rule-based form feedback (always runs as fallback) ──
+  const now=Date.now();
+  if(!claudeInFlight && now-claudeLastCall>1500){
+    if(r.issues?.length){
+      const top=r.issues[0];
+      // Grade A + positive issue → show praise
+      if(r.grade==='A' && ['good'].includes(top.sev)){
+        setFeedback(nextPraise(), 'good', '✅');
+      } else {
+        setFeedback(top.msg, top.sev, top.sev==='bad'?'⚠️':top.sev==='warn'?'🔶':'✅');
+        if(top.sev==='bad') trySpeak(top.msg);
+      }
+    }
+  } else if(r.issues?.length){
+    const top=r.issues[0];
+    if(top.sev==='bad') trySpeak(top.msg);
+  }
+}
+
+// Show angles in HUD without touching reps or grade (used during gate)
+function updateHUDAnglesOnly(r,cfg){
+  const a1el=document.getElementById('h-a1');
+  a1el.textContent=r.a1!==null&&r.a1!==undefined?r.a1+(cfg.a1&&cfg.a1.includes('%')?'':'°'):'---';
+  a1el.className='card-val';
+  const ca2=document.getElementById('card-a2');
+  if(cfg.a2&&r.a2!==null&&r.a2!==undefined){
+    ca2.style.display='';
+    document.getElementById('lbl-a2').textContent=cfg.a2;
+    const a2el=document.getElementById('h-a2');
+    a2el.textContent=r.a2+(cfg.a2.includes('%')?'':'°');
+    a2el.className='card-val '+(r.a2>50?'bad':r.a2>25?'warn':'');
+  }else ca2.style.display='none';
+}
+
+// Rotating praise so it doesn't repeat every 4 seconds
+const PRAISE = [
+  'PERFECT FORM — KEEP IT UP!',
+  'GREAT REP — STAY CONTROLLED!',
+  'EXCELLENT FORM — KEEP GOING!',
+  'SPOT ON — NICE WORK!',
+  'LOOKING GOOD — STAY STRONG!',
+  'SOLID FORM — WELL DONE!',
+];
+let praiseIdx = 0;
+function nextPraise(){ return PRAISE[praiseIdx++ % PRAISE.length]; }
+
+// Rotating praise so it doesn't repeat every 4 seconds
+// ════════════════════════════════════════════════
+
+function getFatigueContext(exId){
+  const s = repState[exId];
+  if(!s || s.repTimes.length < 3) return null;
+
+  // ── Tempo analysis ──
+  const tempos=[];
+  for(let i=1;i<s.repTimes.length;i++){
+    tempos.push((s.repTimes[i]-s.repTimes[i-1])/1000);
+  }
+  const n = tempos.length;
+  const earlyN  = Math.min(3, n);
+  const earlyAvg = tempos.slice(0,earlyN).reduce((a,b)=>a+b,0)/earlyN;
+  const recentTempos = tempos.slice(-2);
+  const recentAvg = recentTempos.reduce((a,b)=>a+b,0)/recentTempos.length;
+  const slowdownPct = Math.round(((recentAvg-earlyAvg)/earlyAvg)*100);
+
+  // ── ROM / depth analysis ──
+  let romDrop = 0;
+  if(s.repDepths.length>=4){
+    const earlyDepth  = s.repDepths.slice(0,3).reduce((a,b)=>a+b,0)/3;
+    const recentDepth = s.repDepths.slice(-2).reduce((a,b)=>a+b,0)/2;
+    // For most exercises lower angle = deeper rep.
+    // Positive romDrop means angle is rising = shallower = cutting reps short.
+    romDrop = Math.round(recentDepth - earlyDepth);
+  }
+
+  // ── Signal classification ──
+  const isFatigued = slowdownPct > 35 || romDrop > 14;
+  const isSlowing  = slowdownPct > 20 || romDrop > 8;
+  const signal     = isFatigued ? 'FATIGUED' : isSlowing ? 'SLOWING' : 'FRESH';
+
+  return {
+    temposStr: tempos.map(t=>t.toFixed(1)).join(', '),
+    earlyAvg:  earlyAvg.toFixed(1),
+    recentAvg: recentAvg.toFixed(1),
+    slowdownPct,
+    romDrop,
+    isFatigued,
+    isSlowing,
+    signal,
+    totalReps: s.reps,
+  };
+}
+
+// Update the PACE HUD card
+function updatePaceHUD(fc){
+  const card = document.getElementById('card-pace');
+  const val  = document.getElementById('h-pace');
+  if(!fc){ card.style.display='none'; return; }
+  card.style.display='';
+  if(fc.isFatigued){
+    val.textContent='FATIGUED'; val.style.color='var(--red)';
+  } else if(fc.isSlowing){
+    val.textContent='TIRING';   val.style.color='var(--amber)';
+  } else {
+    val.textContent='FRESH';    val.style.color='#22aa55';
+  }
+}
+
+// Rule-based fatigue voice cues — fire even without API key
+let lastFatigueCueAt = 0;
+function checkRuleBasedFatigue(fc){
+  if(!fc) return;
+  if(!voiceOn) return;
+  const now=Date.now();
+  if(now-lastFatigueCueAt < 8000) return; // max one fatigue cue every 8s
+
+  if(fc.isFatigued && fc.romDrop > 14){
+    lastFatigueCueAt=now;
+    trySpeak("Full range! Don't cut it short!");
+  } else if(fc.isFatigued && fc.slowdownPct > 35){
+    lastFatigueCueAt=now;
+    trySpeak("Push through! Keep the pace!");
+  } else if(fc.isSlowing && fc.totalReps >= 5){
+    lastFatigueCueAt=now;
+    trySpeak("Stay strong! Two more!");
+  }
+}
+
+// ════════════════════════════════════════════════
+// CLAUDE AI COACHING
+// ════════════════════════════════════════════════
+
+let apiKey          = '';       // set from input on boot
+let claudeLastCall  = 0;        // timestamp of last API call
+let claudeInFlight  = false;    // prevent concurrent calls
+let claudeLastCue   = '';       // avoid repeating identical cues
+const CLAUDE_INTERVAL = 4000;   // ms between coaching calls
+
+// Build a compact prompt payload for Claude
+function buildCoachPrompt(exLabel, r){
+  const angles=[];
+  const cfg=EX_CFG[currentEx]||{};
+  if(r.a1!=null) angles.push((cfg.a1||'Angle 1')+': '+r.a1+'°');
+  if(r.a2!=null) angles.push((cfg.a2||'Angle 2')+': '+r.a2+'°');
+  const topIssue = r.issues?.[0]?.msg || 'None';
+  const fc = getFatigueContext(currentEx);
+  const lines=[
+    'Exercise: '+exLabel,
+    'Angles: '+angles.join(', '),
+    'Form grade: '+(r.grade||'A'),
+    'Top issue detected: '+topIssue,
+    'Reps completed: '+(r.reps||0),
+  ];
+  if(fc){
+    lines.push('Rep tempos (s): '+fc.temposStr);
+    lines.push('Early avg tempo: '+fc.earlyAvg+'s  Recent avg: '+fc.recentAvg+'s');
+    lines.push('Tempo slowdown: '+(fc.slowdownPct>0?'+':'')+fc.slowdownPct+'%');
+    if(fc.romDrop!==0) lines.push('ROM drift: '+(fc.romDrop>0?'+':'')+fc.romDrop+'° (positive = shallower)');
+    lines.push('Fatigue signal: '+fc.signal);
+  }
+  return lines.join('\n');
+}
+
+// Fire-and-forget — never blocks the main loop
+async function callClaude(exLabel, r){
+  if(!apiKey) return;                                   // no key = skip silently
+  if(claudeInFlight) return;                            // already waiting
+  const now=Date.now();
+  if(now-claudeLastCall < CLAUDE_INTERVAL) return;      // throttle
+  claudeLastCall=now;
+  claudeInFlight=true;
+
+  const badge=document.getElementById('ai-badge');
+  badge.style.display='inline';
+  badge.className='thinking';
+  badge.textContent='AI…';
+
+  const systemPrompt=
+    'You are an encouraging gym form coach. The user is doing a dumbbell exercise tracked by pose detection.\n'+
+    'Given the exercise data, respond with EXACTLY ONE coaching cue.\n'+
+    'Rules:\n'+
+    '- Maximum 10 words\n'+
+    '- Use imperative or affirmative voice\n'+
+    '- Be specific: name the body part\n'+
+    '- If grade is A AND top issue is None or contains GOOD/GREAT/TOP/EXTENDED/LOCKED:\n'+
+    '  → Give POSITIVE praise. Examples:\n'+
+    '  "Perfect form, keep that up!"\n'+
+    '  "Excellent depth, chest up!"\n'+
+    '  "Great rep, stay controlled!"\n'+
+    '  "Spot on form, keep going!"\n'+
+    '  Vary the praise — do not repeat same phrase every call.\n'+
+    '- If grade is B or C or issue contains a problem → give a correction cue\n'+
+    '- If fatigue signal is FATIGUED or SLOWING → motivational push cue\n'+
+    '  e.g. "Push through, two more reps!"\n'+
+    '- If ROM drift > 12 → tell them to go deeper\n'+
+    '- If tempo slowdown > 35% → push them to keep pace\n'+
+    '- Never say "I" or "Claude"\n'+
+    '- No hashtags, no markdown, plain text only';
+
+  const userMsg=buildCoachPrompt(exLabel, r);
+
+  try{
+    const resp=await fetch('https://api.aicredits.in/v1/chat/completions',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+apiKey,
+      },
+      body:JSON.stringify({
+        model:'anthropic/claude-sonnet-4-20250514',
+        max_tokens:150,
+        messages:[
+          {role:'system',content:systemPrompt},
+          {role:'user',content:userMsg},
+        ],
+      }),
+    });
+
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({}));
+      const errMsg=err?.error?.message||JSON.stringify(err)||'unknown';
+      console.error('AICredits error', resp.status, errMsg);
+      // Always show full error on screen — visible on mobile without DevTools
+      setFeedback('AI ERR '+resp.status+': '+errMsg.substring(0,80),'bad','❌');
+      if(resp.status===401||errMsg.toLowerCase().includes('auth')||errMsg.toLowerCase().includes('key')){
+        badge.className=''; badge.textContent='BAD KEY';
+        apiKey='';
+      } else if(resp.status===402||errMsg.toLowerCase().includes('credit')||errMsg.toLowerCase().includes('balance')){
+        badge.className=''; badge.textContent='NO CREDITS';
+        apiKey='';
+      } else if(resp.status===429){
+        badge.className=''; badge.textContent='RATE LMT';
+        setTimeout(()=>{badge.style.display='none'},3000);
+      } else {
+        badge.className=''; 
+        badge.textContent='E:'+resp.status;
+        setTimeout(()=>{badge.style.display='none'},6000);
+      }
+      return;
+    }
+
+    const data=await resp.json();
+    const cue=(data?.choices?.[0]?.message?.content||'').trim();
+
+    if(!cue){ badge.style.display='none'; return; }
+
+    // Don't repeat same cue back-to-back
+    if(cue===claudeLastCue){ badge.style.display='none'; return; }
+    claudeLastCue=cue;
+
+    // Show in feedback bar + speak
+    badge.className=''; badge.textContent='AI';
+    setFeedback(cue.toUpperCase(),'good','🤖');
+    if(voiceOn){
+      window.speechSynthesis.cancel();
+      const u=new SpeechSynthesisUtterance(cue.replace(/[!?]/g,''));
+      u.rate=1.0; u.pitch=0.92; u.volume=1;
+      window.speechSynthesis.speak(u);
+      // Update lastMsg so trySpeak doesn't fight with it for 5s
+      lastMsg=cue.toUpperCase(); lastMsgAt=Date.now();
+    }
+
+  } catch(e){
+    // Network/CORS error — show brief message, rule-based coaching continues
+    console.error('AICredits API error:', e);
+    const isCors = e?.message?.toLowerCase().includes('cors') ||
+                   e?.message?.toLowerCase().includes('fetch') ||
+                   e?.message?.toLowerCase().includes('network');
+    badge.className=''; 
+    badge.textContent= isCors ? 'CORS?' : 'NET?';
+    badge.style.display='inline';
+    setTimeout(()=>{ badge.style.display='none'; }, 3000);
+  } finally{
+    claudeInFlight=false;
+  }
+}
+
+function toggleKeyVis(){
+  const inp=document.getElementById('api-key-input');
+  inp.type=inp.type==='password'?'text':'password';
+}
+
+// ════════════════════════════════════════════════
+// VOICE
+function trySpeak(text){
+  if(!voiceOn)return;const now=Date.now();
+  if(text===lastMsg&&now-lastMsgAt<4500)return;
+  lastMsg=text;lastMsgAt=now;window.speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text.toLowerCase().replace(/[!?]/g,''));
+  u.rate=1.05;u.pitch=0.9;u.volume=1;window.speechSynthesis.speak(u);
+}
+
+// UI
+function setFeedback(msg,cls,icon){
+  document.getElementById('fb-text').textContent=msg;
+  document.getElementById('fb-text').className='fb-text '+(cls||'');
+  document.getElementById('fb-icon').textContent=icon||'●';
+}
+
+function selectDay(btn,day){
+  document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  buildExBar(day);
+  const first=WORKOUT[day].exercises[0];
+  const firstBtn=document.querySelector('.ex-btn');
+  selectExById(first.id,firstBtn);
+}
+
+function buildExBar(day){
+  const bar=document.getElementById('exbar');bar.innerHTML='';
+  WORKOUT[day].exercises.forEach((ex,i)=>{
+    const b=document.createElement('button');
+    b.className='ex-btn'+(i===0?' on':'');b.textContent=ex.label;
+    b.onclick=()=>{selectExById(ex.id,b)};
+    bar.appendChild(b);
+  });
+}
+
+function selectExById(id,btn){
+  currentEx=id;
+  let exData=null;
+  for(const d of Object.values(WORKOUT)){const f=d.exercises.find(e=>e.id===id);if(f){exData=f;break}}
+  if(!exData)return;
+  document.querySelectorAll('.ex-btn').forEach(b=>b.classList.remove('on'));
+  if(btn)btn.classList.add('on');
+  document.getElementById('ex-title').textContent=exData.label;
+  const cfg=EX_CFG[id]||{};
+  document.getElementById('lbl-a1').textContent=cfg.a1||'ANGLE';
+  document.getElementById('sr-val').textContent=exData.sets+'x  '+exData.reps;
+  document.getElementById('cam-tag').textContent='📷 '+(exData.cam==='SIDE'?'SIDEWAYS TO CAMERA':'FACE CAMERA');
+  document.getElementById('h-reps').textContent=repState[id]?.reps||0;
+  document.getElementById('h-grade').textContent='-';document.getElementById('h-grade').className='card-val grade grade-A';
+  lastMsg='';
+  // Reset gate and smooth history for new exercise
+  resetGate();
+  resetCtxCheck();
+  clearSmoothHistory();
+  // Also reset any pending phase state from previous exercise
+  if(repState[id]){ repState[id].pendingPhase=null; repState[id].pendingFrames=0; }
+  setFeedback(exData.note||'READY','warn','💪');
+  trySpeak(exData.label.toLowerCase()+'. '+((exData.note||'').split(',')[0]).toLowerCase());
+}
+
+function resetReps(){
+  if(!currentEx)return;
+  const s=repState[currentEx];
+  s.reps=0; s.phase=initPhase(currentEx); s.lastRepAt=0;
+  s.repTimes=[]; s.repDepths=[]; s.pendingPhase=null; s.pendingFrames=0;
+  fatigueAngleCapture=null;
+  lastFatigueCueAt=0;
+  document.getElementById('h-reps').textContent='0';
+  document.getElementById('card-pace').style.display='none';
+  resetGate();
+  setFeedback('REPS RESET — GET BACK IN POSITION','warn','↺');
+}
+
+function toggleVoice(){
+  voiceOn=!voiceOn;
+  const b=document.getElementById('voice-btn');
+  b.textContent=voiceOn?'🔊 VOICE':'🔇 MUTED';
+  b.className='ctrl-btn '+(voiceOn?'voice':'muted');
+  if(!voiceOn)window.speechSynthesis.cancel();
+}
+
+// BOOT — MoveNet Thunder
+async function boot(){
+  const keyInput = document.getElementById('api-key-input');
+  apiKey = (keyInput?.value||'').trim();
+
+  document.getElementById('start-overlay').style.display='none';
+  const ld   = document.getElementById('loading-msg');
+  const ltxt = document.getElementById('ld-main');
+  ld.style.display='flex';
+  buildExBar('mon');
+  selectExById('floor_press', document.querySelector('.ex-btn'));
+
+  try{
+    // Step 1: WebGL backend
+    ltxt.textContent='INITIALISING WEBGL...';
+    setFeedback('SETTING UP WEBGL BACKEND...','warn','⚙️');
+    await tf.setBackend('webgl');
+    await tf.ready();
+
+    // Step 2: Load MoveNet Thunder (~12MB, cached after first load)
+    ltxt.textContent='LOADING MOVENET THUNDER (~12MB FIRST TIME)';
+    setFeedback('LOADING MOVENET THUNDER — PLEASE WAIT...','warn','⏳');
+    detector = await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
+    );
+
+    // Step 3: Camera
+    ltxt.textContent='STARTING CAMERA...';
+    setFeedback('REQUESTING CAMERA ACCESS...','warn','📷');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ width:1280, height:720, facingMode:'user' }, audio:false
+    });
+    video.srcObject = stream;
+    await new Promise((res,rej)=>{
+      video.onloadedmetadata = res;
+      setTimeout(()=>rej(new Error('Camera timeout')), 10000);
+    });
+    await video.play();
+
+    // Step 4: Warm up model (first inference is slow, do it on a black frame)
+    ltxt.textContent='WARMING UP MODEL...';
+    await detector.estimatePoses(video);
+
+    // GO
+    ld.style.display='none';
+    document.getElementById('live-dot').className='live-dot on';
+    document.getElementById('status-txt').textContent='LIVE';
+    detectLoop(); // start the rAF loop
+
+    if(apiKey){
+      const badge=document.getElementById('ai-badge');
+      badge.style.display='inline'; badge.className=''; badge.textContent='AI ON';
+      setFeedback('MOVENET ACTIVE — AI COACHING ENABLED','good','🤖');
+      trySpeak('Camera active. AI coaching enabled. Select your exercise and begin.');
+    } else {
+      setFeedback('MOVENET ACTIVE — SELECT DAY & EXERCISE','good','🎯');
+      trySpeak('Camera active. Select your exercise and begin.');
+    }
+  } catch(e){
+    ltxt.textContent = 'ERROR: '+e.message;
+    setFeedback('STARTUP ERROR — '+e.message.substring(0,60),'bad','❌');
+    console.error('Boot error:',e);
+  }
+}
+
+buildExBar('mon');
+</script>
+</body>
+</html>
