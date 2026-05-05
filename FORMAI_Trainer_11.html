@@ -279,7 +279,7 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
 const WORKOUT = {
   mon:{label:'CHEST & TRICEPS',exercises:[
     {id:'floor_press',   label:'FLOOR PRESS',      sets:4,reps:'8-12', cam:'SIDE', note:'Lie on back, camera from your side'},
-    {id:'floor_flye',    label:'FLOOR FLYE',        sets:3,reps:'12-15',cam:'FRONT',note:'Lie on back, camera above facing you'},
+    {id:'floor_flye',    label:'FLOOR FLYE',        sets:3,reps:'12-15',cam:'SIDE', note:'Lie on back, camera from your side'},
     {id:'pushup',        label:'PUSH-UP',           sets:3,reps:'15-20',cam:'SIDE', note:'Camera at ground level, side-on'},
     {id:'skull_crusher', label:'SKULL CRUSHER',     sets:3,reps:'10-12',cam:'SIDE', note:'Lie on back, camera from your side'},
     {id:'ohd_tri_ext',   label:'OHD TRICEP EXT',    sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, arms overhead'},
@@ -613,53 +613,40 @@ function analyzeFloorPress(lm, cg){
 }
 
 function analyzeFloorFlye(lm){
-  // Camera: FRONT (switched from SIDE).
-  // With front camera, person is lying on back looking up at camera.
-  // Both arms clearly visible sweeping wide and coming together.
+  // Camera: SIDE. Person lies on back, camera at their side.
+  // Arms sweep from above chest (TOP) out wide to floor (BOTTOM) and back.
   //
-  // REP COUNTING — wrist spread relative to shoulder width
-  // TOP  (arms together above chest): wrists close = spread ~ shoulder width
-  // BOTTOM (arms swept wide to floor): wrists wide apart = spread >> shoulder width
+  // Rep signal: wrist elevation above shoulder — same geometry as floor press.
+  //   TOP  (arms extended above chest): wrist well above shoulder → wristElev large
+  //   BOTTOM (arms swept to floor):     wrist near shoulder level → wristElev ~0
   //
-  // spreadRatio = wristSpread / shoulderWidth
-  // TOP:    spreadRatio ~ 1.0-1.3
-  // BOTTOM: spreadRatio ~ 2.5-3.5 (arms swept wide)
+  // Form check: elbow angle must stay > 140° (straight-arm flye).
+  // Bending elbows < 125° = pressing, not flying.
 
-  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  if(!ok(LS,.25)&&!ok(RS,.25)) return {valid:false, msg:'LIE ON BACK - FACE CAMERA ABOVE YOU', grade:'?'};
-  if(!ok(LW,.22)&&!ok(RW,.22)) return {valid:false, msg:'BOTH WRISTS MUST BE VISIBLE', grade:'?'};
+  const [S,E,W] = bestArm(lm);
+  if(!ok(S,.22)||!ok(W,.22)) return {valid:false, msg:'LIE DOWN - CAMERA FROM YOUR SIDE', grade:'?'};
 
-  const shoulderW = ok(LS,.25)&&ok(RS,.25) ? Math.abs(LS.x - RS.x) : 0.15;
-  const wristW    = ok(LW,.22)&&ok(RW,.22) ? Math.abs(LW.x - RW.x) : shoulderW;
-  const spreadRatio = shoulderW > 0.02 ? wristW / shoulderW : 1;
+  const wristElev = S.y - W.y; // positive = wrist above shoulder = arms above chest
+  const ea = sa(S,E,W) ?? 160;
 
-  // Elbow angle — must stay nearly straight (flye, not press)
-  const la = (ok(LS,.22)&&ok(LE,.22)&&ok(LW,.22)) ? calcAngle(LS,LE,LW) : 999;
-  const ra = (ok(RS,.22)&&ok(RE,.22)&&ok(RW,.22)) ? calcAngle(RS,RE,RW) : 999;
-  const elbowAng = Math.round(Math.min(la<999?la:999, ra<999?ra:999));
-  const validElbow = elbowAng < 999;
-  const doingPress = validElbow && elbowAng < 128;
-
-  // Asymmetry: left and right wrists should be at similar height (Y)
-  const asymmetry = ok(LW,.22)&&ok(RW,.22) ? Math.abs(LW.y - RW.y) : 0;
-  const isAsymmetric = asymmetry > 0.08;
+  const doingPress = ea < 125;
 
   const s = repState[currentEx];
-  // TOP:    arms together above chest — spreadRatio close to 1
-  if(spreadRatio < 1.4) tryEnterPhase(s,'down');
-  // BOTTOM: arms swept wide — spreadRatio large
-  if(spreadRatio > 2.2 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+  // BOTTOM: arms swept wide to floor — wrist has dropped to shoulder level
+  if(wristElev < 0.07) tryEnterPhase(s,'down');
+  // TOP: arms back above chest — wrist well above shoulder
+  if(wristElev > 0.16 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
 
   const issues=[]; let grade='A';
-  if(doingPress)     { issues.push({msg:'STRAIGHTEN ARMS - FLYE NOT A PRESS',     sev:'warn'}); grade='B'; }
-  if(isAsymmetric)   { issues.push({msg:'KEEP BOTH ARMS EVEN - ONE SIDE HIGHER',  sev:'warn'}); if(grade==='A')grade='B'; }
+  if(doingPress){ issues.push({msg:'KEEP ARMS STRAIGHT - FLYE NOT A PRESS', sev:'warn'}); grade='B'; }
 
   if(!issues.length){
-    if(spreadRatio > 2.0)    issues.push({msg:'ARMS WIDE - SQUEEZE CHEST TO BRING TOGETHER', sev:'good'});
-    else if(spreadRatio > 1.4) issues.push({msg:'SWEEP ARMS WIDE - FEEL THE CHEST STRETCH', sev:'warn'});
-    else                       issues.push({msg:'ARMS TOGETHER - SLOWLY SWEEP OUT WIDE',    sev:'good'});
+    if(wristElev < 0.07)      issues.push({msg:'ARMS WIDE - SQUEEZE CHEST TOGETHER!',  sev:'good'});
+    else if(wristElev < 0.10) issues.push({msg:'SWEEP DOWN - FEEL THE CHEST STRETCH',  sev:'warn'});
+    else if(wristElev < 0.16) issues.push({msg:'LIFTING - SQUEEZE CHEST INWARD',       sev:'warn'});
+    else                      issues.push({msg:'TOP - SLOWLY SWEEP ARMS OUT WIDE',     sev:'good'});
   }
-  return {valid:true, a1:Math.round(spreadRatio*10)/10, a2:null, issues, grade, reps:s.reps};
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
 }
 
 function analyzePushup(lm){
@@ -969,7 +956,7 @@ function analyzePosture(lm){
 // u1/u2 = unit suffix for HUD display. '°' = degrees (default), '' = unitless score/ratio
 const EX_CFG={
   floor_press:  {fn:lm=>analyzeFloorPress(lm,false),  a1:'WRIST ELEV', u1:'',  a2:null},
-  floor_flye:   {fn:analyzeFloorFlye,                  a1:'ARM SPREAD', u1:'x', a2:null},
+  floor_flye:   {fn:analyzeFloorFlye,                  a1:'ELBOW ANG',          a2:null},
   pushup:       {fn:analyzePushup,                     a1:'ELBOW ANG',  a2:null},
   skull_crusher:{fn:analyzeSkullCrusher,               a1:'ELBOW ANG',  a2:null},
   ohd_tri_ext:  {fn:analyzeOHDTricepExt,              a1:'ELBOW ANG',  a2:'BACK DEG'},
