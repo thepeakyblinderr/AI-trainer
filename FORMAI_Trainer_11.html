@@ -282,7 +282,7 @@ const WORKOUT = {
     {id:'floor_flye',    label:'FLOOR FLYE',        sets:3,reps:'12-15',cam:'SIDE', note:'Lie on back, camera from your side'},
     {id:'pushup',        label:'PUSH-UP',           sets:3,reps:'15-20',cam:'SIDE', note:'Camera at ground level, side-on'},
     {id:'skull_crusher', label:'SKULL CRUSHER',     sets:3,reps:'10-12',cam:'SIDE', note:'Lie on back, camera from your side'},
-    {id:'ohd_tri_ext',   label:'OHD TRICEP EXT',    sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, arms overhead'},
+    {id:'ohd_tri_ext',   label:'OHD TRICEP EXT',    sets:3,reps:'12-15',cam:'SIDE', note:'Stand sideways, camera at shoulder height'},
   ]},
   tue:{label:'BACK & BICEPS',exercises:[
     {id:'bent_row',      label:'BENT-OVER ROW',     sets:4,reps:'8-12', cam:'SIDE', note:'Hinge forward, camera from your side'},
@@ -733,48 +733,36 @@ function analyzeSkullCrusher(lm){
 }
 
 function analyzeOHDTricepExt(lm){
-  // Camera: FRONT. Arms raised overhead, elbows bend behind head.
-  // KEY RULE: elbows must stay close to ears - pointing straight up.
-  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  const [S,E,W] = bestArm(lm);
-  if(!ok(E,.25)) return {valid:false, msg:'FACE CAMERA - RAISE ARMS OVERHEAD', grade:'?'};
+  // Camera: SIDE. Stand sideways, arms raised overhead.
+  // Elbows stay fixed by ears; wrists travel behind head (down) and back up.
+  // From the side the full elbow-angle arc is cleanly visible in 2D.
 
-  const ea = sa(S,E,W) ?? 160;
+  const [S,E,W] = bestArm(lm);
+  if(!ok(E,.25)) return {valid:false, msg:'STAND SIDEWAYS - RAISE ARMS OVERHEAD', grade:'?'};
+
+  const ea   = sa(S,E,W) ?? 160;
   const back = torsoAngle(lm) ?? 0;
 
-  // Elbow flare: compare elbow spread vs shoulder spread in normalised coords
-  // Good form: elbows should be no wider than shoulder width
-  let elbowFlare = false;
-  if(ok(LS,.3)&&ok(RS,.3)&&ok(LE,.3)&&ok(RE,.3)){
-    const shoulderW = Math.abs(LS.x - RS.x);
-    const elbowW    = Math.abs(LE.x - RE.x);
-    // Elbows wider than 110% of shoulder width = flaring
-    elbowFlare = elbowW > shoulderW * 1.1;
-  }
-
-  // Upper arm vertical: elbow should be near head/ear level when overhead
-  // Proxy: elbow Y should be close to nose Y (lm[0])
-  let elbowDropped = false;
-  const nose = lm[0];
-  if(ok(nose,.2)&&ok(LE,.3)&&ok(RE,.3)){
-    const avgElbowY = (LE.y + RE.y)/2;
-    // If average elbow Y is more than 0.2 below nose → elbows have dropped
-    elbowDropped = avgElbowY > nose.y + 0.18;
+  // Upper arm must stay vertical (elbow above shoulder).
+  // From the side: if elbow X drifts too far from shoulder X the upper arm
+  // is tilting forward/backward instead of staying locked by the ear.
+  let upperArmDrift = false;
+  if(ok(S,.25) && ok(E,.25)){
+    upperArmDrift = Math.abs(E.x - S.x) > 0.16;
   }
 
   const s = repState[currentEx];
-  if(ea < 75) tryEnterPhase(s,'down');
+  if(ea < 75)  tryEnterPhase(s,'down');
   if(ea > 155 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
 
   const issues=[]; let grade='A';
-  if(back > 20)     { issues.push({msg:'STOP ARCHING BACK - BRACE YOUR CORE', sev:'bad'});  grade='C'; }
-  if(elbowFlare)    { issues.push({msg:'ELBOWS IN - POINT THEM AT THE CEILING', sev:'warn'}); if(grade==='A')grade='B'; }
-  if(elbowDropped)  { issues.push({msg:'RAISE ELBOWS HIGHER - KEEP THEM BY EARS', sev:'warn'}); if(grade==='A')grade='B'; }
+  if(back > 20)     { issues.push({msg:'STOP ARCHING BACK - BRACE YOUR CORE',       sev:'bad'});  grade='C'; }
+  if(upperArmDrift) { issues.push({msg:'KEEP ELBOW FIXED - UPPER ARM STAYS VERTICAL', sev:'warn'}); if(grade==='A')grade='B'; }
 
   if(!issues.length){
-    if(ea < 80)       issues.push({msg:'ARMS BENT - EXTEND STRAIGHT UP!', sev:'good'});
-    else if(ea < 145) issues.push({msg:'LOWER BEHIND HEAD - ELBOWS BY EARS', sev:'warn'});
-    else              issues.push({msg:'EXTENDED - LOWER WEIGHT BEHIND HEAD', sev:'good'});
+    if(ea < 80)       issues.push({msg:'ARMS BENT - EXTEND STRAIGHT UP!',          sev:'good'});
+    else if(ea < 145) issues.push({msg:'LOWER BEHIND HEAD - ELBOW BY EAR',         sev:'warn'});
+    else              issues.push({msg:'EXTENDED - LOWER WEIGHT BEHIND HEAD',       sev:'good'});
   }
   return {valid:true, a1:ea, a2:back, issues, grade, reps:s.reps};
 }
