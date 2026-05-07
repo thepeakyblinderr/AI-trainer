@@ -345,6 +345,11 @@ Object.values(WORKOUT).forEach(d=>d.exercises.forEach(e=>{
 // depth = primary angle at bottom of rep (captured from fatigueAngleCapture)
 let fatigueAngleCapture = null; // set each frame in onResults from r.a1
 
+// Shrug baseline — calibrated from first 20 active frames so the rep threshold
+// is scale-invariant across camera distances and individual neck lengths.
+let shrugSamples = [], shrugBaseline = 0;
+function resetShrugBaseline(){ shrugSamples=[]; shrugBaseline=0; }
+
 function countRep(s){
   const now=Date.now();
   if(now-s.lastRepAt<700)return;
@@ -804,78 +809,135 @@ function analyzeLunge(lm){
 }
 
 function analyzeLateralRaise(lm){
-  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - UPPER BODY VISIBLE',grade:'?'};
-  const lE=ok(LE)?Math.max(0,LS.y-LE.y):0, rE=ok(RE)?Math.max(0,RS.y-RE.y):0;
-  const elev=Math.round(Math.max(lE,rE)*400);
-  const s=repState[currentEx];
-  if(elev>25) tryEnterPhase(s,'up');
-  if(elev<8&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const lA=sa(LS,LE,LW)??170, rA=sa(RS,RE,RW)??170;
-  const issues=[];let grade='A';
-  if(Math.min(lA,rA)<90){issues.push({msg:'SLIGHT BEND ONLY - NOT A ROW',sev:'warn'});grade='B'}
+  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS)||!ok(RS)) return {valid:false, msg:'FACE CAMERA - UPPER BODY VISIBLE', grade:'?'};
+
+  // Arm abduction angle from vertical — scale-invariant, reaches ~80° at shoulder height.
+  // atan2(horizontal_spread, vertical_drop): 0° = hanging, 90° = arms horizontal.
+  const lAng = ok(LS,.3)&&ok(LE,.3) ?
+    Math.round(Math.atan2(Math.abs(LE.x-LS.x), Math.max(0.01,LE.y-LS.y))*180/Math.PI) : 0;
+  const rAng = ok(RS,.3)&&ok(RE,.3) ?
+    Math.round(Math.atan2(Math.abs(RE.x-RS.x), Math.max(0.01,RE.y-RS.y))*180/Math.PI) : 0;
+  const armAngle = Math.max(lAng, rAng);
+
+  // Form: wrist climbing above shoulder = turning into an upright row
+  const wristTooHigh = (ok(LS,.3)&&ok(LW,.25)&&LW.y < LS.y-0.03) ||
+                       (ok(RS,.3)&&ok(RW,.25)&&RW.y < RS.y-0.03);
+  // Form: excessive elbow bend
+  const lA = sa(LS,LE,LW)??170, rA = sa(RS,RE,RW)??170;
+  const tooMuchBend = Math.min(lA,rA) < 85;
+
+  const s = repState[currentEx];
+  if(armAngle > 60)  tryEnterPhase(s,'up');
+  if(armAngle < 25 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(wristTooHigh) { issues.push({msg:'LOWER WEIGHT - TURNING INTO A ROW',  sev:'warn'}); grade='B'; }
+  if(tooMuchBend)  { issues.push({msg:'SLIGHT BEND ONLY - NOT A ROW',        sev:'warn'}); if(grade==='A')grade='B'; }
   if(!issues.length){
-    if(elev>50)issues.push({msg:'GOOD HEIGHT - LOWER SLOWLY',sev:'good'})
-    else if(elev>20)issues.push({msg:'RAISING - LEAD WITH ELBOWS',sev:'warn'})
-    else issues.push({msg:'RAISE ARMS TO SHOULDER HEIGHT',sev:'good'})
+    if(armAngle > 60)       issues.push({msg:'GOOD HEIGHT - LOWER SLOWLY',        sev:'good'});
+    else if(armAngle > 30)  issues.push({msg:'RAISING - LEAD WITH ELBOWS',        sev:'warn'});
+    else                    issues.push({msg:'RAISE ARMS TO SHOULDER HEIGHT',     sev:'good'});
   }
-  return{valid:true,a1:elev,a2:null,issues,grade,reps:s.reps}
+  return {valid:true, a1:armAngle, a2:null, issues, grade, reps:s.reps};
 }
 
 function analyzeFrontRaise(lm){
-  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  const S=ok(LS)?LS:RS, W=ok(LW)?LW:RW;
-  if(!ok(S,.28))return{valid:false,msg:'SIDE-ON TO CAMERA',grade:'?'};
-  const elev=Math.round(Math.max(0,S.y-(ok(W)?W.y:S.y))*400);
-  const s=repState[currentEx];
-  if(elev>30) tryEnterPhase(s,'up');
-  if(elev<8&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const issues=[];let grade='A';
+  const [LS,RS,LW,RW] = [lm[11],lm[12],lm[15],lm[16]];
+  const S = ok(LS,.28)?LS:RS, W = ok(LW,.25)?LW:RW;
+  if(!ok(S,.28)) return {valid:false, msg:'SIDE-ON TO CAMERA', grade:'?'};
+
+  // Arm elevation angle from vertical (shoulder→wrist), same formula as lateral raise.
+  // From the side: 0° = arm hanging down, ~80-90° = arm raised to shoulder height.
+  const armAngle = ok(W,.25) ?
+    Math.round(Math.atan2(Math.abs(W.x-S.x), Math.max(0.01,W.y-S.y))*180/Math.PI) : 0;
+
+  const s = repState[currentEx];
+  if(armAngle > 60)  tryEnterPhase(s,'up');
+  if(armAngle < 25 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
   if(!issues.length){
-    if(elev>50)issues.push({msg:'TOP - LOWER SLOWLY',sev:'good'})
-    else if(elev>20)issues.push({msg:'RAISE TO SHOULDER HEIGHT',sev:'warn'})
-    else issues.push({msg:'ARMS AT SIDE - RAISE FORWARD',sev:'good'})
+    if(armAngle > 60)      issues.push({msg:'TOP - LOWER SLOWLY',              sev:'good'});
+    else if(armAngle > 30) issues.push({msg:'RAISE TO SHOULDER HEIGHT',        sev:'warn'});
+    else                   issues.push({msg:'ARMS AT SIDE - RAISE FORWARD',   sev:'good'});
   }
-  return{valid:true,a1:elev,a2:null,issues,grade,reps:s.reps}
+  return {valid:true, a1:armAngle, a2:null, issues, grade, reps:s.reps};
 }
 
 function analyzeUprightRow(lm){
-  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - UPPER BODY VISIBLE',grade:'?'};
-  const lH=ok(LE)?Math.max(0,LS.y-LE.y):0, rH=ok(RE)?Math.max(0,RS.y-RE.y):0;
-  const eh=Math.round(Math.max(lH,rH)*400);
-  const s=repState[currentEx];
-  if(eh>35) tryEnterPhase(s,'up');
-  if(eh<10&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const aboveWrist=(ok(LE)&&ok(LW))?LE.y<LW.y:((ok(RE)&&ok(RW))?RE.y<RW.y:true);
-  const issues=[];let grade='A';
-  if(!aboveWrist){issues.push({msg:'ELBOWS HIGHER THAN WRISTS',sev:'warn'});grade='B'}
+  const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  const [LH,RH] = [lm[23],lm[24]];
+  if(!ok(LS)||!ok(RS)) return {valid:false, msg:'FACE CAMERA - UPPER BODY VISIBLE', grade:'?'};
+
+  // Normalize elbow elevation against hip-to-shoulder body scale so the
+  // thresholds work regardless of how far the person stands from the camera.
+  const lBody = ok(LS,.3)&&ok(LH,.3) ? Math.max(0.05,LH.y-LS.y) : 0;
+  const rBody = ok(RS,.3)&&ok(RH,.3) ? Math.max(0.05,RH.y-RS.y) : 0;
+  const bodyScale = Math.max(0.05,(lBody+rBody)/Math.max(1,(lBody>0?1:0)+(rBody>0?1:0)));
+
+  const lElev = ok(LS,.3)&&ok(LE,.3) ? Math.max(0,LS.y-LE.y) : 0;
+  const rElev = ok(RS,.3)&&ok(RE,.3) ? Math.max(0,RS.y-RE.y) : 0;
+  // normElev: 0 = elbows at shoulder level, ~30 = elbows at chin height (good top)
+  const normElev = Math.round(Math.max(lElev,rElev)/bodyScale*100);
+
+  const elbAboveWrist = (ok(LE)&&ok(LW)) ? LE.y<LW.y : ((ok(RE)&&ok(RW)) ? RE.y<RW.y : true);
+
+  const s = repState[currentEx];
+  if(normElev > 22) tryEnterPhase(s,'up');
+  if(normElev < 6 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(!elbAboveWrist){ issues.push({msg:'ELBOWS HIGHER THAN WRISTS', sev:'warn'}); grade='B'; }
   if(!issues.length){
-    if(eh>50)issues.push({msg:'TOP OF ROW - HOLD A BEAT!',sev:'good'})
-    else if(eh>25)issues.push({msg:'PULL - ELBOWS LEAD',sev:'warn'})
-    else issues.push({msg:'ARMS DOWN - PULL UP',sev:'good'})
+    if(normElev > 22)      issues.push({msg:'TOP OF ROW - HOLD A BEAT!',  sev:'good'});
+    else if(normElev > 10) issues.push({msg:'PULL - ELBOWS LEAD',         sev:'warn'});
+    else                   issues.push({msg:'ARMS DOWN - PULL UP',        sev:'good'});
   }
-  return{valid:true,a1:eh,a2:null,issues,grade,reps:s.reps}
+  return {valid:true, a1:normElev, a2:null, issues, grade, reps:s.reps};
 }
 
 function analyzeShrug(lm){
-  const[LS,RS]=[lm[11],lm[12]];
-  if(!ok(LS)||!ok(RS))return{valid:false,msg:'FACE CAMERA - SHOULDERS VISIBLE',grade:'?'};
-  const asym=Math.round(Math.abs(LS.y-RS.y)*400);
-  const nose=lm[0], avgS=(LS.y+RS.y)/2;
-  const ed=ok(nose,.2)?Math.round(Math.abs(avgS-nose.y)*400):60;
-  const s=repState[currentEx];
-  // ed small = shoulders near nose = fully shrugged. Require clear shrug (ed<26) before counting return.
-  if(ed<26) tryEnterPhase(s,'up');
-  if(ed>62&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const issues=[];let grade='A';
-  if(asym>18){issues.push({msg:'EVEN OUT - SHOULDERS UNEVEN',sev:'warn'});grade='B'}
-  if(!issues.length){
-    if(ed<26)issues.push({msg:'SHRUGGED - HOLD & SQUEEZE TRAPS!',sev:'good'})
-    else if(ed<50)issues.push({msg:'SHRUGGING UP - EARS TO SHOULDERS',sev:'warn'})
-    else issues.push({msg:'RELAXED - SHRUG STRAIGHT UP',sev:'good'})
+  const [LS,RS] = [lm[11],lm[12]];
+  if(!ok(LS)||!ok(RS)) return {valid:false, msg:'FACE CAMERA - SHOULDERS VISIBLE', grade:'?'};
+  const nose = lm[0];
+  if(!ok(nose,.15)) return {valid:false, msg:'FACE CAMERA - HEAD MUST BE VISIBLE', grade:'?'};
+
+  const asym = Math.round(Math.abs(LS.y-RS.y)*400);
+  const avgS  = (LS.y+RS.y)/2;
+  const dist  = avgS - nose.y; // shoulder-to-nose distance (positive; larger = more relaxed)
+
+  // ── Dynamic baseline calibration ────────────────────────────────────────
+  // Accumulate first 20 frames to establish the personal relaxed distance.
+  // This makes thresholds scale-invariant across camera distances / neck lengths.
+  if(shrugBaseline === 0){
+    shrugSamples.push(dist);
+    if(shrugSamples.length >= 20){
+      const sorted = [...shrugSamples].sort((a,b)=>a-b);
+      shrugBaseline = sorted[Math.floor(sorted.length/2)]; // median
+    } else {
+      return {valid:true, a1:100, a2:asym,
+              issues:[{msg:'STAND RELAXED - CALIBRATING...', sev:'warn'}],
+              grade:'A', reps:repState[currentEx].reps};
+    }
   }
-  return{valid:true,a1:ed,a2:asym,issues,grade,reps:s.reps}
+
+  // Shrug % — 100 = fully relaxed baseline, drops when shoulders rise toward nose.
+  // A real shrug raises shoulders ~8-12% closer to nose.
+  const shrugPct = Math.round(dist / shrugBaseline * 100);
+
+  const s = repState[currentEx];
+  if(shrugPct < 91) tryEnterPhase(s,'up');                                     // shoulders lifted
+  if(shrugPct > 97 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s); // returned to rest
+
+  const issues=[]; let grade='A';
+  if(asym > 18){ issues.push({msg:'EVEN OUT - SHOULDERS UNEVEN',      sev:'warn'}); grade='B'; }
+  if(!issues.length){
+    if(shrugPct < 91)      issues.push({msg:'SHRUGGED - HOLD & SQUEEZE TRAPS!', sev:'good'});
+    else if(shrugPct < 96) issues.push({msg:'SHRUGGING UP - EARS TO SHOULDERS', sev:'warn'});
+    else                   issues.push({msg:'RELAXED - SHRUG STRAIGHT UP',      sev:'good'});
+  }
+  return {valid:true, a1:shrugPct, a2:asym, issues, grade, reps:s.reps};
 }
 
 function analyzeTricepKickback(lm){
@@ -959,10 +1021,10 @@ const EX_CFG={
   sumo_sq:      {fn:lm=>analyzeSquat(lm,'sumo'),       a1:'KNEE ANG',   a2:'BACK DEG'},
   calf_raise:   {fn:analyzeCalfRaise,                  a1:'BODY LEAN',  a2:null},
   ohd_press:    {fn:analyzeOHDPress,                   a1:'ELBOW ANG',  a2:'BACK DEG'},
-  lat_raise:    {fn:analyzeLateralRaise,               a1:'ARM HEIGHT', u1:'', a2:null},
-  front_raise:  {fn:analyzeFrontRaise,                 a1:'ARM HEIGHT', u1:'', a2:null},
-  upright_row:  {fn:analyzeUprightRow,                 a1:'ELB HEIGHT', u1:'', a2:null},
-  shrug:        {fn:analyzeShrug,                      a1:'ELEVATION',  u1:'', a2:'ASYMMETRY', u2:''},
+  lat_raise:    {fn:analyzeLateralRaise,               a1:'ARM ANGLE',          a2:null},
+  front_raise:  {fn:analyzeFrontRaise,                 a1:'ARM ANGLE',          a2:null},
+  upright_row:  {fn:analyzeUprightRow,                 a1:'ELB ELEV',   u1:'',  a2:null},
+  shrug:        {fn:analyzeShrug,                      a1:'SHRUG %',    u1:'',  a2:'ASYMMETRY', u2:''},
   db_curl:      {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
   incline_curl: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
   hammer_curl2: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
@@ -1855,6 +1917,7 @@ function selectExById(id,btn){
   resetGate();
   resetCtxCheck();
   clearSmoothHistory();
+  resetShrugBaseline();
   // Also reset any pending phase state from previous exercise
   if(repState[id]){ repState[id].pendingPhase=null; repState[id].pendingFrames=0; }
   // Close rest overlay and cancel any active pause when switching exercises
@@ -1876,6 +1939,7 @@ function resetReps(){
   document.getElementById('h-reps').textContent='0';
   document.getElementById('card-pace').style.display='none';
   resetGate();
+  resetShrugBaseline();
   setFeedback('REPS RESET — GET BACK IN POSITION','warn','↺');
 }
 
@@ -1956,6 +2020,7 @@ function tapReady(){
   document.getElementById('h-reps').textContent='0';
   document.getElementById('card-pace').style.display='none';
   resetGate();
+  resetShrugBaseline();
   syncPauseBtn();
   updateSetHUD();
   const next=s.setsCompleted+1;
