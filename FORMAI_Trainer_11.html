@@ -278,46 +278,46 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
 <script>
 const WORKOUT = {
   mon:{label:'CHEST & TRICEPS',exercises:[
-    {id:'floor_press',   label:'FLOOR PRESS',      sets:4,reps:'8-12', cam:'SIDE', note:'Lie on back, camera from your side'},
-    {id:'floor_flye',    label:'FLOOR FLYE',        sets:3,reps:'12-15',cam:'SIDE', note:'Lie on back, camera from your side'},
-    {id:'pushup',        label:'PUSH-UP',           sets:3,reps:'15-20',cam:'SIDE', note:'Camera at ground level, side-on'},
-    {id:'skull_crusher', label:'SKULL CRUSHER',     sets:3,reps:'10-12',cam:'SIDE', note:'Lie on back, camera from your side'},
-    {id:'ohd_tri_ext',   label:'OHD TRICEP EXT',    sets:3,reps:'12-15',cam:'SIDE', note:'Stand sideways, camera at shoulder height'},
+    {id:'floor_press',   label:'FLOOR PRESS',      sets:3,reps:8, cam:'SIDE', note:'Lie on back, camera from your side'},
+    {id:'floor_flye',    label:'FLOOR FLYE',        sets:3,reps:8,cam:'SIDE', note:'Lie on back, camera from your side'},
+    {id:'pushup',        label:'PUSH-UP',           sets:3,reps:8,cam:'SIDE', note:'Camera at ground level, side-on'},
+    {id:'skull_crusher', label:'SKULL CRUSHER',     sets:3,reps:8,cam:'SIDE', note:'Lie on back, camera from your side'},
+    {id:'ohd_tri_ext',   label:'OHD TRICEP EXT',    sets:3,reps:8,cam:'SIDE', note:'Stand sideways, camera at shoulder height'},
   ]},
   tue:{label:'BACK & BICEPS',exercises:[
-    {id:'bent_row',      label:'BENT-OVER ROW',     sets:4,reps:'8-12', cam:'SIDE', note:'Hinge forward, camera from your side'},
-    {id:'single_row',    label:'SINGLE ARM ROW',    sets:3,reps:'10-12',cam:'SIDE', note:'Lean on chair, camera from your side'},
-    {id:'stiff_rdl',     label:'STIFF-LEG DL',      sets:4,reps:'10-12',cam:'SIDE', note:'Hip hinge, camera from your side'},
-    {id:'hammer_curl',   label:'HAMMER CURL',       sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, elbows tucked in'},
-    {id:'conc_curl',     label:'CONC. CURL',        sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, elbow braced on knee'},
+    {id:'bent_row',      label:'BENT-OVER ROW',     sets:3,reps:8, cam:'SIDE', note:'Hinge forward, camera from your side'},
+    {id:'single_row',    label:'SINGLE ARM ROW',    sets:3,reps:8,cam:'SIDE', note:'Lean on chair, camera from your side'},
+    {id:'stiff_rdl',     label:'STIFF-LEG DL',      sets:3,reps:8,cam:'SIDE', note:'Hip hinge, camera from your side'},
+    {id:'hammer_curl',   label:'HAMMER CURL',       sets:3,reps:8,cam:'FRONT',note:'Face camera, elbows tucked in'},
+    {id:'conc_curl',     label:'CONC. CURL',        sets:3,reps:8,cam:'FRONT',note:'Face camera, elbow braced on knee'},
   ]},
   wed:{label:'LEGS & GLUTES',exercises:[
-    {id:'goblet_sq',     label:'GOBLET SQUAT',      sets:4,reps:'10-15',cam:'FRONT',note:'Face camera, hold DB at chest'},
-    {id:'rom_dl',        label:'ROMANIAN DL',       sets:4,reps:'10-12',cam:'SIDE', note:'Hip hinge, camera from your side'},
-    {id:'rev_lunge',     label:'REVERSE LUNGE',     sets:3,reps:'12ea', cam:'FRONT',note:'Face camera, step back to lunge'},
-    {id:'sumo_sq',       label:'SUMO SQUAT',        sets:3,reps:'12-15',cam:'FRONT',note:'Wide stance, face camera'},
-    {id:'calf_raise',    label:'CALF RAISE',        sets:4,reps:'15-20',cam:'SIDE', note:'Stand sideways, rise on toes'},
+    {id:'goblet_sq',     label:'GOBLET SQUAT',      sets:3,reps:8,cam:'FRONT',note:'Face camera, hold DB at chest'},
+    {id:'rom_dl',        label:'ROMANIAN DL',       sets:3,reps:8,cam:'SIDE', note:'Hip hinge, camera from your side'},
+    {id:'rev_lunge',     label:'REVERSE LUNGE',     sets:3,reps:8, cam:'FRONT',note:'Face camera, step back to lunge'},
+    {id:'sumo_sq',       label:'SUMO SQUAT',        sets:3,reps:8,cam:'FRONT',note:'Wide stance, face camera'},
+    {id:'calf_raise',    label:'CALF RAISE',        sets:3,reps:8,cam:'SIDE', note:'Stand sideways, rise on toes'},
   ]},
   thu:{label:'SHOULDERS & TRAPS',exercises:[
-    {id:'ohd_press',     label:'OHD PRESS',         sets:4,reps:'8-12', cam:'FRONT',note:'Face camera, press overhead'},
-    {id:'lat_raise',     label:'LATERAL RAISE',     sets:3,reps:'15-20',cam:'FRONT',note:'Face camera, raise to shoulder height'},
-    {id:'front_raise',   label:'FRONT RAISE',       sets:3,reps:'12-15',cam:'SIDE', note:'Stand sideways, arms raise forward'},
-    {id:'upright_row',   label:'UPRIGHT ROW',       sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, elbows lead high'},
-    {id:'shrug',         label:'SHRUG',             sets:3,reps:'15-20',cam:'FRONT',note:'Face camera, shrug shoulders up'},
+    {id:'ohd_press',     label:'OHD PRESS',         sets:3,reps:8, cam:'FRONT',note:'Face camera, press overhead'},
+    {id:'lat_raise',     label:'LATERAL RAISE',     sets:3,reps:8,cam:'FRONT',note:'Face camera, raise to shoulder height'},
+    {id:'front_raise',   label:'FRONT RAISE',       sets:3,reps:8,cam:'SIDE', note:'Stand sideways, arms raise forward'},
+    {id:'upright_row',   label:'UPRIGHT ROW',       sets:3,reps:8,cam:'FRONT',note:'Face camera, elbows lead high'},
+    {id:'shrug',         label:'SHRUG',             sets:3,reps:8,cam:'FRONT',note:'Face camera, shrug shoulders up'},
   ]},
   fri:{label:'ARMS',exercises:[
-    {id:'db_curl',       label:'DB CURL',           sets:4,reps:'10-12',cam:'FRONT',note:'Face camera, strict curl form'},
-    {id:'incline_curl',  label:'INCLINE CURL',      sets:3,reps:'12-15',cam:'SIDE', note:'Lean back on wall, camera from side'},
-    {id:'hammer_curl2',  label:'HAMMER CURL',       sets:3,reps:'12-15',cam:'FRONT',note:'Face camera, neutral grip'},
-    {id:'floor_cg',      label:'CLOSE-GRIP PRESS',  sets:4,reps:'10-12',cam:'SIDE', note:'Lie on back, elbows close to body'},
-    {id:'tri_kick',      label:'TRICEP KICKBACK',   sets:3,reps:'12-15',cam:'SIDE', note:'Hinge forward, camera from side'},
+    {id:'db_curl',       label:'DB CURL',           sets:3,reps:8,cam:'FRONT',note:'Face camera, strict curl form'},
+    {id:'incline_curl',  label:'INCLINE CURL',      sets:3,reps:8,cam:'SIDE', note:'Lean back on wall, camera from side'},
+    {id:'hammer_curl2',  label:'HAMMER CURL',       sets:3,reps:8,cam:'FRONT',note:'Face camera, neutral grip'},
+    {id:'floor_cg',      label:'CLOSE-GRIP PRESS',  sets:3,reps:8,cam:'SIDE', note:'Lie on back, elbows close to body'},
+    {id:'tri_kick',      label:'TRICEP KICKBACK',   sets:3,reps:8,cam:'SIDE', note:'Hinge forward, camera from side'},
   ]},
   sat:{label:'FULL BODY',exercises:[
-    {id:'sq_press',      label:'SQUAT TO PRESS',    sets:4,reps:'10-12',cam:'FRONT',note:'Face camera, full body visible'},
-    {id:'deadlift',      label:'DEADLIFT',          sets:3,reps:'10-12',cam:'SIDE', note:'Hip hinge, camera from your side'},
-    {id:'push_press',    label:'PUSH PRESS',        sets:3,reps:'10-12',cam:'FRONT',note:'Face camera, leg drive then press'},
-    {id:'renegade_row',  label:'RENEGADE ROW',      sets:3,reps:'8-10ea',cam:'SIDE',note:'Plank position, camera from side'},
-    {id:'farmers_carry', label:"FARMER'S CARRY",    sets:3,reps:'30-40s',cam:'FRONT',note:'Face camera, walk upright'},
+    {id:'sq_press',      label:'SQUAT TO PRESS',    sets:3,reps:8,cam:'FRONT',note:'Face camera, full body visible'},
+    {id:'deadlift',      label:'DEADLIFT',          sets:3,reps:8,cam:'SIDE', note:'Hip hinge, camera from your side'},
+    {id:'push_press',    label:'PUSH PRESS',        sets:3,reps:8,cam:'FRONT',note:'Face camera, leg drive then press'},
+    {id:'renegade_row',  label:'RENEGADE ROW',      sets:3,reps:8,cam:'SIDE',note:'Plank position, camera from side'},
+    {id:'farmers_carry', label:"FARMER'S CARRY",    sets:3,reps:8,cam:'FRONT',note:'Face camera, walk upright'},
   ]},
 };
 
@@ -867,31 +867,35 @@ function analyzeFrontRaise(lm){
 
 function analyzeUprightRow(lm){
   const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  const [LH,RH] = [lm[23],lm[24]];
   if(!ok(LS)||!ok(RS)) return {valid:false, msg:'FACE CAMERA - UPPER BODY VISIBLE', grade:'?'};
 
-  // Normalize elbow elevation against hip-to-shoulder body scale so the
-  // thresholds work regardless of how far the person stands from the camera.
-  const lBody = ok(LS,.3)&&ok(LH,.3) ? Math.max(0.05,LH.y-LS.y) : 0;
-  const rBody = ok(RS,.3)&&ok(RH,.3) ? Math.max(0.05,RH.y-RS.y) : 0;
-  const bodyScale = Math.max(0.05,(lBody+rBody)/Math.max(1,(lBody>0?1:0)+(rBody>0?1:0)));
+  // Use shoulder-to-nose distance as the body-scale reference.
+  // Elbows should rise toward chin/nose height, so this gives a natural 0→~50
+  // scale that works regardless of camera distance and without needing hips in frame.
+  const nose  = lm[0];
+  const avgSy = (LS.y + RS.y) / 2;
+  const snDist = ok(nose,.18) ? Math.max(0.04, avgSy - nose.y) : 0.20;
 
-  const lElev = ok(LS,.3)&&ok(LE,.3) ? Math.max(0,LS.y-LE.y) : 0;
-  const rElev = ok(RS,.3)&&ok(RE,.3) ? Math.max(0,RS.y-RE.y) : 0;
-  // normElev: 0 = elbows at shoulder level, ~30 = elbows at chin height (good top)
-  const normElev = Math.round(Math.max(lElev,rElev)/bodyScale*100);
+  // Elbow elevation above shoulder, normalised by shoulder-to-nose distance.
+  //   0  = elbow at or below shoulder level (rest)
+  //  ~50 = elbow at chin height (good top position)
+  const lElev = ok(LS,.3)&&ok(LE,.3) ? Math.max(0, LS.y-LE.y) : 0;
+  const rElev = ok(RS,.3)&&ok(RE,.3) ? Math.max(0, RS.y-RE.y) : 0;
+  const normElev = Math.round(Math.max(lElev,rElev) / snDist * 100);
 
-  const elbAboveWrist = (ok(LE)&&ok(LW)) ? LE.y<LW.y : ((ok(RE)&&ok(RW)) ? RE.y<RW.y : true);
+  // Form: elbows must stay above wrists throughout the pull
+  const elbAboveWrist = (ok(LE,.3)&&ok(LW,.25)) ? LE.y<LW.y
+                      : (ok(RE,.3)&&ok(RW,.25)) ? RE.y<RW.y : true;
 
   const s = repState[currentEx];
-  if(normElev > 22) tryEnterPhase(s,'up');
-  if(normElev < 6 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+  if(normElev > 38) tryEnterPhase(s,'up');   // elbows well above shoulder (~chin height)
+  if(normElev < 8 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
 
   const issues=[]; let grade='A';
   if(!elbAboveWrist){ issues.push({msg:'ELBOWS HIGHER THAN WRISTS', sev:'warn'}); grade='B'; }
   if(!issues.length){
-    if(normElev > 22)      issues.push({msg:'TOP OF ROW - HOLD A BEAT!',  sev:'good'});
-    else if(normElev > 10) issues.push({msg:'PULL - ELBOWS LEAD',         sev:'warn'});
+    if(normElev > 38)      issues.push({msg:'TOP OF ROW - HOLD A BEAT!',  sev:'good'});
+    else if(normElev > 15) issues.push({msg:'PULL - ELBOWS LEAD HIGH',    sev:'warn'});
     else                   issues.push({msg:'ARMS DOWN - PULL UP',        sev:'good'});
   }
   return {valid:true, a1:normElev, a2:null, issues, grade, reps:s.reps};
