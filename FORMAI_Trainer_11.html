@@ -867,31 +867,35 @@ function analyzeFrontRaise(lm){
 
 function analyzeUprightRow(lm){
   const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
-  const [LH,RH] = [lm[23],lm[24]];
   if(!ok(LS)||!ok(RS)) return {valid:false, msg:'FACE CAMERA - UPPER BODY VISIBLE', grade:'?'};
 
-  // Normalize elbow elevation against hip-to-shoulder body scale so the
-  // thresholds work regardless of how far the person stands from the camera.
-  const lBody = ok(LS,.3)&&ok(LH,.3) ? Math.max(0.05,LH.y-LS.y) : 0;
-  const rBody = ok(RS,.3)&&ok(RH,.3) ? Math.max(0.05,RH.y-RS.y) : 0;
-  const bodyScale = Math.max(0.05,(lBody+rBody)/Math.max(1,(lBody>0?1:0)+(rBody>0?1:0)));
+  // Use shoulder-to-nose distance as the body-scale reference.
+  // Elbows should rise toward chin/nose height, so this gives a natural 0→~50
+  // scale that works regardless of camera distance and without needing hips in frame.
+  const nose  = lm[0];
+  const avgSy = (LS.y + RS.y) / 2;
+  const snDist = ok(nose,.18) ? Math.max(0.04, avgSy - nose.y) : 0.20;
 
-  const lElev = ok(LS,.3)&&ok(LE,.3) ? Math.max(0,LS.y-LE.y) : 0;
-  const rElev = ok(RS,.3)&&ok(RE,.3) ? Math.max(0,RS.y-RE.y) : 0;
-  // normElev: 0 = elbows at shoulder level, ~30 = elbows at chin height (good top)
-  const normElev = Math.round(Math.max(lElev,rElev)/bodyScale*100);
+  // Elbow elevation above shoulder, normalised by shoulder-to-nose distance.
+  //   0  = elbow at or below shoulder level (rest)
+  //  ~50 = elbow at chin height (good top position)
+  const lElev = ok(LS,.3)&&ok(LE,.3) ? Math.max(0, LS.y-LE.y) : 0;
+  const rElev = ok(RS,.3)&&ok(RE,.3) ? Math.max(0, RS.y-RE.y) : 0;
+  const normElev = Math.round(Math.max(lElev,rElev) / snDist * 100);
 
-  const elbAboveWrist = (ok(LE)&&ok(LW)) ? LE.y<LW.y : ((ok(RE)&&ok(RW)) ? RE.y<RW.y : true);
+  // Form: elbows must stay above wrists throughout the pull
+  const elbAboveWrist = (ok(LE,.3)&&ok(LW,.25)) ? LE.y<LW.y
+                      : (ok(RE,.3)&&ok(RW,.25)) ? RE.y<RW.y : true;
 
   const s = repState[currentEx];
-  if(normElev > 22) tryEnterPhase(s,'up');
-  if(normElev < 6 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+  if(normElev > 38) tryEnterPhase(s,'up');   // elbows well above shoulder (~chin height)
+  if(normElev < 8 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
 
   const issues=[]; let grade='A';
   if(!elbAboveWrist){ issues.push({msg:'ELBOWS HIGHER THAN WRISTS', sev:'warn'}); grade='B'; }
   if(!issues.length){
-    if(normElev > 22)      issues.push({msg:'TOP OF ROW - HOLD A BEAT!',  sev:'good'});
-    else if(normElev > 10) issues.push({msg:'PULL - ELBOWS LEAD',         sev:'warn'});
+    if(normElev > 38)      issues.push({msg:'TOP OF ROW - HOLD A BEAT!',  sev:'good'});
+    else if(normElev > 15) issues.push({msg:'PULL - ELBOWS LEAD HIGH',    sev:'warn'});
     else                   issues.push({msg:'ARMS DOWN - PULL UP',        sev:'good'});
   }
   return {valid:true, a1:normElev, a2:null, issues, grade, reps:s.reps};
