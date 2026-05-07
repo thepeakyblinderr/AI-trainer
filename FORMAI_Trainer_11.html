@@ -177,6 +177,12 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
 .rest-cta:hover{background:#0055dd;box-shadow:0 6px 22px rgba(0,102,255,.45)}
 .rest-cta.finish{background:#22aa55;box-shadow:0 4px 18px rgba(34,170,85,.35)}
 .rest-cta.finish:hover{background:#1a9944}
+#rest-ai-summary{
+  background:rgba(0,102,255,.07);border:1px solid rgba(0,102,255,.2);
+  border-radius:6px;padding:12px 16px;font-size:.78rem;line-height:1.6;
+  color:#ccd;max-width:320px;text-align:left;letter-spacing:.5px;
+}
+#rest-ai-summary.loading{color:#888;text-align:center;font-style:italic}
 </style>
 </head>
 <body>
@@ -264,6 +270,7 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
     <div class="rest-box">
       <div class="rest-set-label" id="rest-title">SET 1 DONE</div>
       <div class="rest-sub-label" id="rest-sub">REST UP &mdash; TAP WHEN READY</div>
+      <div id="rest-ai-summary" style="display:none"></div>
       <button class="rest-cta" id="rest-cta-btn" onclick="tapReady()">&#x25B6; READY FOR SET 2</button>
     </div>
   </div>
@@ -323,6 +330,7 @@ const WORKOUT = {
 
 let currentEx='floor_press', voiceOn=true, lastMsg='', lastMsgAt=0, lmCache=[];
 let isPaused=false, isResting=false;
+let claudeLastCall = 0;  // declared early so countRep can reset it
 
 // Exercises where resting position = "top" so we need to wait for a full DOWN first
 // before counting. Starting them at phase:'down' prevents false reps on load.
@@ -338,7 +346,7 @@ function initPhase(id){ return NEEDS_DOWN_START.has(id)?'down':'up'; }
 
 const repState={};
 Object.values(WORKOUT).forEach(d=>d.exercises.forEach(e=>{
-  repState[e.id]={reps:0, phase:initPhase(e.id), lastRepAt:0, repTimes:[], repDepths:[], pendingPhase:null, pendingFrames:0, setsCompleted:0};
+  repState[e.id]={reps:0, phase:initPhase(e.id), lastRepAt:0, repTimes:[], repDepths:[], pendingPhase:null, pendingFrames:0, setsCompleted:0, gradeLog:[], issueLog:{}};
 }));
 
 // Debounced rep counter — min 700ms between reps prevents noise spikes
@@ -363,6 +371,8 @@ function countRep(s){
     if(s.repDepths.length>10) s.repDepths.shift();
   }
   trySpeak('rep '+s.reps);
+  // Signal next callClaude to fire immediately (bypass interval throttle)
+  claudeLastCall = 0;
 }
 
 
@@ -1556,6 +1566,10 @@ function onResults(results){
   updateHUD(r,cfg);
 }
 
+// Rotating issue index for rule-based feedback — cycles across all issues, not just [0]
+let ruleIssueIdx = 0;
+let ruleLastRotateAt = 0;
+
 function updateHUD(r,cfg){
   document.getElementById('h-reps').textContent=r.reps??0;
   updateHUDAnglesOnly(r,cfg);
@@ -1563,6 +1577,20 @@ function updateHUD(r,cfg){
   g.textContent=r.grade||'-';
   g.className='card-val grade grade-'+(r.grade||'A');
   updateSetHUD();
+
+  // ── Log form for set summary ──
+  if(GATE.state==='ACTIVE' && currentEx){
+    const s=repState[currentEx];
+    if(r.grade) s.gradeLog.push(r.grade);
+    if(s.gradeLog.length>60) s.gradeLog.shift();
+    if(r.issues){
+      r.issues.forEach(issue=>{
+        if(issue.sev!=='good'){
+          s.issueLog[issue.msg]=(s.issueLog[issue.msg]||0)+1;
+        }
+      });
+    }
+  }
 
   // ── Fatigue tracking ──
   const fc=getFatigueContext(currentEx);
@@ -1576,25 +1604,34 @@ function updateHUD(r,cfg){
       const f=d.exercises.find(e=>e.id===currentEx);
       if(f){exLabel=f.label;break}
     }
-    callClaude(exLabel, r);
+    // Adaptive interval: call faster when there are form issues, slower when perfect
+    const hasIssues = r.issues?.some(i=>i.sev==='bad'||i.sev==='warn');
+    const interval = hasIssues ? 4000 : 9000;
+    callClaude(exLabel, r, interval);
   }
 
-  // ── Rule-based form feedback (always runs as fallback) ──
+  // ── Rule-based form feedback (fallback when Claude not active / between calls) ──
   const now=Date.now();
   if(!claudeInFlight && now-claudeLastCall>1500){
     if(r.issues?.length){
-      const top=r.issues[0];
-      // Grade A + positive issue → show praise
-      if(r.grade==='A' && ['good'].includes(top.sev)){
+      // Rotate through all issues every 2.5s instead of always showing [0]
+      if(now-ruleLastRotateAt > 2500){
+        ruleIssueIdx=(ruleIssueIdx+1) % r.issues.length;
+        ruleLastRotateAt=now;
+      }
+      const idx = Math.min(ruleIssueIdx, r.issues.length-1);
+      const issue = r.issues[idx];
+      if(r.grade==='A' && issue.sev==='good'){
         setFeedback(nextPraise(), 'good', '✅');
       } else {
-        setFeedback(top.msg, top.sev, top.sev==='bad'?'⚠️':top.sev==='warn'?'🔶':'✅');
-        if(top.sev==='bad') trySpeak(top.msg);
+        setFeedback(issue.msg, issue.sev, issue.sev==='bad'?'⚠️':issue.sev==='warn'?'🔶':'✅');
+        if(issue.sev==='bad') trySpeak(issue.msg);
       }
     }
   } else if(r.issues?.length){
-    const top=r.issues[0];
-    if(top.sev==='bad') trySpeak(top.msg);
+    // Even when Claude is in-flight, still speak urgent bad-form cues
+    const bad=r.issues.find(i=>i.sev==='bad');
+    if(bad) trySpeak(bad.msg);
   }
 }
 
@@ -1716,43 +1753,117 @@ function checkRuleBasedFatigue(fc){
 // ════════════════════════════════════════════════
 
 let apiKey          = '';       // set from input on boot
-let claudeLastCall  = 0;        // timestamp of last API call
 let claudeInFlight  = false;    // prevent concurrent calls
 let claudeLastCue   = '';       // avoid repeating identical cues
 const CLAUDE_INTERVAL = 4000;   // ms between coaching calls
 
 // Build a compact prompt payload for Claude
 function buildCoachPrompt(exLabel, r){
-  const angles=[];
   const cfg=EX_CFG[currentEx]||{};
-  if(r.a1!=null) angles.push((cfg.a1||'Angle 1')+': '+r.a1+'°');
-  if(r.a2!=null) angles.push((cfg.a2||'Angle 2')+': '+r.a2+'°');
-  const topIssue = r.issues?.[0]?.msg || 'None';
-  const fc = getFatigueContext(currentEx);
+  const u1='u1' in cfg?cfg.u1:'°';
+  const u2='u2' in cfg?cfg.u2:'°';
+  const angles=[];
+  if(r.a1!=null) angles.push((cfg.a1||'Metric 1')+': '+r.a1+u1);
+  if(r.a2!=null) angles.push((cfg.a2||'Metric 2')+': '+r.a2+u2);
+  const s=repState[currentEx]||{};
+  const total=getTotalSets(currentEx);
+  const allIssues=(r.issues||[]).map(i=>(i.sev==='bad'?'BAD':i.sev==='warn'?'WARN':'OK')+': '+i.msg).join(' | ');
+  const fc=getFatigueContext(currentEx);
   const lines=[
     'Exercise: '+exLabel,
-    'Angles: '+angles.join(', '),
+    'Set: '+(s.setsCompleted+1)+' of '+total,
+    'Reps this set: '+(r.reps||0),
+    'Current phase: '+(s.phase||'?'),
+    'Metrics: '+(angles.join(', ')||'N/A'),
     'Form grade: '+(r.grade||'A'),
-    'Top issue detected: '+topIssue,
-    'Reps completed: '+(r.reps||0),
+    'Issues: '+(allIssues||'None'),
   ];
   if(fc){
-    lines.push('Rep tempos (s): '+fc.temposStr);
-    lines.push('Early avg tempo: '+fc.earlyAvg+'s  Recent avg: '+fc.recentAvg+'s');
     lines.push('Tempo slowdown: '+(fc.slowdownPct>0?'+':'')+fc.slowdownPct+'%');
-    if(fc.romDrop!==0) lines.push('ROM drift: '+(fc.romDrop>0?'+':'')+fc.romDrop+'° (positive = shallower)');
+    if(fc.romDrop!==0) lines.push('ROM drift: '+(fc.romDrop>0?'+':'')+fc.romDrop+(u1==='°'?'°':u1)+' (positive = shallower)');
     lines.push('Fatigue signal: '+fc.signal);
   }
   return lines.join('\n');
 }
 
+function buildSetSummaryPrompt(exLabel, s, fc){
+  const total=getTotalSets(currentEx);
+  // Grade distribution
+  const grades=s.gradeLog||[];
+  const gradeCounts={A:0,B:0,C:0,F:0};
+  grades.forEach(g=>{gradeCounts[g]=(gradeCounts[g]||0)+1});
+  const gradeStr=Object.entries(gradeCounts).filter(([,n])=>n>0).map(([g,n])=>g+':'+n).join(' ');
+  // Top recurring issues (sorted by frequency)
+  const issueEntries=Object.entries(s.issueLog||{}).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const issueStr=issueEntries.length?issueEntries.map(([m,n])=>m+' (×'+n+')').join(', '):'None';
+  const lines=[
+    'Exercise: '+exLabel,
+    'Set just completed: '+s.setsCompleted+' of '+total,
+    'Reps completed: '+s.reps,
+    'Grade distribution this set: '+(gradeStr||'A only'),
+    'Recurring form issues: '+issueStr,
+  ];
+  if(fc){
+    lines.push('Tempo slowdown: '+(fc.slowdownPct>0?'+':'')+fc.slowdownPct+'%');
+    lines.push('Fatigue signal: '+fc.signal);
+  }
+  return lines.join('\n');
+}
+
+async function callClaudeSetSummary(exLabel){
+  if(!apiKey) return;
+  const summaryEl=document.getElementById('rest-ai-summary');
+  summaryEl.style.display='block';
+  summaryEl.className='loading';
+  summaryEl.textContent='🤖 AI coach analysing your set…';
+
+  const s=repState[currentEx]||{};
+  const fc=getFatigueContext(currentEx);
+  const prompt=buildSetSummaryPrompt(exLabel,s,fc);
+
+  const systemPrompt=
+    'You are a gym form coach reviewing a completed set. Give 2 short sentences:\n'+
+    '1. What they did well (specific, not generic).\n'+
+    '2. One key thing to focus on in the next set (specific body part or cue).\n'+
+    'Rules: max 30 words total. Imperative voice. No markdown. No "I". No "Claude". Plain text only.';
+
+  try{
+    const resp=await fetch('https://api.aicredits.in/v1/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},
+      body:JSON.stringify({
+        model:'anthropic/claude-sonnet-4-20250514',
+        max_tokens:80,
+        messages:[{role:'system',content:systemPrompt},{role:'user',content:prompt}],
+      }),
+    });
+    if(!resp.ok){summaryEl.textContent='';summaryEl.style.display='none';return;}
+    const data=await resp.json();
+    const cue=(data?.choices?.[0]?.message?.content||'').trim();
+    if(cue){
+      summaryEl.className='';
+      summaryEl.innerHTML='<strong>🤖 AI COACH</strong><br>'+cue;
+      if(voiceOn){
+        window.speechSynthesis.cancel();
+        const u=new SpeechSynthesisUtterance(cue);
+        u.rate=0.95; u.pitch=0.92; u.volume=1;
+        window.speechSynthesis.speak(u);
+      }
+    } else {
+      summaryEl.style.display='none';
+    }
+  }catch(e){
+    summaryEl.style.display='none';
+  }
+}
+
 // Fire-and-forget — never blocks the main loop
-async function callClaude(exLabel, r){
+async function callClaude(exLabel, r, interval=CLAUDE_INTERVAL){
   if(!apiKey) return;                                   // no key = skip silently
   if(isPaused||isResting) return;                       // paused/resting = no credits burned
   if(claudeInFlight) return;                            // already waiting
   const now=Date.now();
-  if(now-claudeLastCall < CLAUDE_INTERVAL) return;      // throttle
+  if(now-claudeLastCall < interval) return;             // adaptive throttle
   claudeLastCall=now;
   claudeInFlight=true;
 
@@ -2008,18 +2119,30 @@ function doneWithSet(){
   }
 
   document.getElementById('rest-overlay').style.display='flex';
-  // Sync pause button appearance while resting
   syncPauseBtn();
   updateSetHUD();
+
+  // Fire AI set summary (async, hides itself on failure)
+  if(apiKey){
+    let exLabel=currentEx;
+    for(const d of Object.values(WORKOUT)){
+      const f=d.exercises.find(e=>e.id===currentEx);
+      if(f){exLabel=f.label;break}
+    }
+    callClaudeSetSummary(exLabel);
+  } else {
+    document.getElementById('rest-ai-summary').style.display='none';
+  }
 }
 
 function tapReady(){
   isResting=false;
   document.getElementById('rest-overlay').style.display='none';
-  // Reset reps for the new set
+  // Reset reps and per-set form log for the new set
   const s=repState[currentEx];
   s.reps=0; s.phase=initPhase(currentEx); s.lastRepAt=0;
   s.repTimes=[]; s.repDepths=[]; s.pendingPhase=null; s.pendingFrames=0;
+  s.gradeLog=[]; s.issueLog={};
   fatigueAngleCapture=null; lastFatigueCueAt=0;
   document.getElementById('h-reps').textContent='0';
   document.getElementById('card-pace').style.display='none';
