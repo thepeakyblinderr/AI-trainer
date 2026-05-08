@@ -579,54 +579,61 @@ function analyzeHinge(lm,variant){
 // ══════════════════════════════════════════════
 
 function analyzeFloorPress(lm, cg){
-  // Camera: SIDE.
-  // REP COUNTING — wrist vertical movement (more stable than elbow angle when lying down)
-  // When pressing up: wrist rises toward ceiling → wristElev increases
-  // When lowering:    elbows return to floor   → wristElev decreases
+  // Camera: SIDE. Person lies on back.
   //
-  // wristElev = S.y - W.y  (positive = wrist higher than shoulder = arm pressing up)
-  // At BOTTOM (elbows on floor): wristElev ~0.02-0.06 (wrist barely above shoulder)
-  // At TOP    (arms extended):   wristElev ~0.20-0.30 (wrist well above shoulder)
+  // Regular press — wrist elevation signal:
+  //   BOTTOM (elbows touch floor): wristElev ~0.02-0.06
+  //   TOP    (arms extended):      wristElev ~0.20-0.30
+  //
+  // Close-grip press — elbow angle signal (wrist never drops as low because
+  //   elbows stay tucked, so wristElev threshold is unreliable):
+  //   BOTTOM (elbows bent, tucked to chest): ea ~80-95°
+  //   TOP    (arms extended):                ea ~160-175°
 
   const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
   const [S,E,W] = bestArm(lm);
   if(!ok(S,.22)||!ok(W,.22)) return {valid:false, msg:'LIE DOWN - CAMERA FROM YOUR SIDE', grade:'?'};
 
-  // Primary rep signal: wrist elevation above shoulder
   const wristElev = S.y - W.y;
-
-  // Secondary form signal: elbow angle (not used for rep counting, only form feedback)
   const la = (ok(LS,.22)&&ok(LE,.22)&&ok(LW,.22)) ? calcAngle(LS,LE,LW) : 999;
   const ra = (ok(RS,.22)&&ok(RE,.22)&&ok(RW,.22)) ? calcAngle(RS,RE,RW) : 999;
   const ea = Math.round(la<ra && la<999 ? la : ra<999 ? ra : sa(S,E,W)??160);
 
-  // Form checks
-  const wristBehind = ok(W,.22)&&ok(E,.22) && (W.x - E.x) > 0.12;
-  const flare    = ok(LE,.22)&&ok(LS,.22) && Math.abs(LE.x - LS.x) > 0.28;
-  // Close-grip form: elbow angle at bottom should be tight (< 90°). Not applicable mid-press.
-  const cgElbowLoose = cg && ea < 999 && ea > 95 && wristElev < 0.14;
-
   const s = repState[currentEx];
-  // BOTTOM: wrist near shoulder level — elbows back on floor / tucked
-  // Close-grip keeps elbows tighter so wrist never drops as low → use a looser threshold
-  const bottomThresh = cg ? 0.12 : 0.06;
-  if(wristElev < bottomThresh) tryEnterPhase(s,'down');
-  // TOP: wrist well above shoulder — arm extended
-  if(wristElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  if(cg){
+    // Close-grip: elbow angle is the reliable signal
+    if(ea < 95)  tryEnterPhase(s,'down');
+    if(ea > 155 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+  } else {
+    // Regular floor press: wrist elevation
+    if(wristElev < 0.06) tryEnterPhase(s,'down');
+    if(wristElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+  }
+
+  // Form checks (side-camera x-comparison is valid for elbows vs shoulder width)
+  const wristBehind = ok(W,.22)&&ok(E,.22) && (W.x - E.x) > 0.12;
+  const flare = !cg && ok(LE,.22)&&ok(LS,.22) && Math.abs(LE.x - LS.x) > 0.28;
 
   const issues=[]; let grade='A';
-  if(cgElbowLoose)              { issues.push({msg:'TUCK ELBOWS IN - CLOSE GRIP',           sev:'warn'}); grade='B'; }
-  else if(flare && !cg)        { issues.push({msg:'ELBOWS SLIGHTLY TOO WIDE - ANGLE IN', sev:'warn'}); grade='B'; }
-  if(wristBehind)              { issues.push({msg:'WRISTS FORWARD - KEEP ABOVE ELBOWS', sev:'warn'}); if(grade==='A')grade='B'; }
+  if(flare)       { issues.push({msg:'ELBOWS TOO WIDE - TUCK IN',         sev:'warn'}); grade='B'; }
+  if(wristBehind) { issues.push({msg:'WRISTS FORWARD - KEEP ABOVE ELBOWS',sev:'warn'}); if(grade==='A')grade='B'; }
 
   if(!issues.length){
-    if(wristElev < 0.06)       issues.push({msg:'ELBOWS ON FLOOR - DRIVE UP HARD!',     sev:'good'});
-    else if(wristElev < 0.12)  issues.push({msg:cg?'ELBOWS CLOSE - PRESS':'LOWER UNTIL ELBOWS TOUCH FLOOR', sev:'warn'});
-    else if(wristElev < 0.18)  issues.push({msg:'PRESSING UP - EXTEND FULLY',           sev:'warn'});
-    else                       issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL',   sev:'good'});
+    if(cg){
+      if(ea < 95)       issues.push({msg:'ELBOWS TUCKED - DRIVE UP HARD!',    sev:'good'});
+      else if(ea < 140) issues.push({msg:'PRESSING - KEEP ELBOWS IN TIGHT',   sev:'warn'});
+      else              issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL', sev:'good'});
+    } else {
+      if(wristElev < 0.06)      issues.push({msg:'ELBOWS ON FLOOR - DRIVE UP HARD!',    sev:'good'});
+      else if(wristElev < 0.12) issues.push({msg:'LOWER UNTIL ELBOWS TOUCH FLOOR',      sev:'warn'});
+      else if(wristElev < 0.18) issues.push({msg:'PRESSING UP - EXTEND FULLY',          sev:'warn'});
+      else                      issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL',  sev:'good'});
+    }
   }
-  // Show wristElev*100 as the HUD metric (more meaningful than raw elbow angle here)
-  return {valid:true, a1:Math.round(wristElev*100), a2:null, issues, grade, reps:s.reps};
+
+  const a1 = cg ? ea : Math.round(wristElev*100);
+  return {valid:true, a1, a2:null, issues, grade, reps:s.reps};
 }
 
 function analyzeFloorFlye(lm){
@@ -957,20 +964,39 @@ function analyzeShrug(lm){
 }
 
 function analyzeTricepKickback(lm){
-  const ta=torsoAngle(lm);
-  if(ta===null)return{valid:false,msg:'SIDE-ON TO CAMERA - HINGE FORWARD',grade:'?'};
-  const[S,E,W]=bestArm(lm);const ea=sa(S,E,W)??90;
-  const s=repState[currentEx];
-  if(ea>155) tryEnterPhase(s,'up');
-  if(ea<60&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const issues=[];let grade='A';
-  if(ta<28){issues.push({msg:'LEAN MORE FORWARD - TORSO PARALLEL',sev:'warn'});grade='B'}
+  // Camera: SIDE. Person hinges forward ~45°, upper arm parallel to floor.
+  //
+  // Rep signal: elbow angle (shoulder → elbow → wrist)
+  //   BOTTOM (forearm hanging down, elbow bent): ea ~80-100°
+  //   TOP    (arm fully extended, kickback done): ea ~155-175°
+  //
+  // Old bug: 'down' threshold was ea < 60 — a normal bent arm at rest sits at
+  // ~90° so the down phase was never entered and no reps could count.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'SIDE-ON TO CAMERA - HINGE FORWARD', grade:'?'};
+
+  const [S,E,W] = bestArm(lm);
+  if(!ok(S,.28)||!ok(E,.28)) return {valid:false, msg:'ARM NOT VISIBLE - ADJUST CAMERA', grade:'?'};
+
+  const ea = sa(S,E,W) ?? 90;
+  const s  = repState[currentEx];
+
+  // TOP: arm straight (kickback complete)
+  if(ea > 150) tryEnterPhase(s,'up');
+  // BOTTOM: arm bent back to ~90° resting position
+  if(ea < 105 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(ta < 22){ issues.push({msg:'LEAN FURTHER FORWARD - TORSO PARALLEL', sev:'warn'}); grade='B'; }
+
   if(!issues.length){
-    if(ea>155)issues.push({msg:'FULL EXTENSION - SQUEEZE TRICEP!',sev:'good'})
-    else if(ea<70)issues.push({msg:'ARM BENT - KICK BACK!',sev:'warn'})
-    else issues.push({msg:'EXTEND FULLY',sev:'warn'})
+    if(ea > 150)      issues.push({msg:'FULL EXTENSION - SQUEEZE TRICEP!',  sev:'good'});
+    else if(ea > 110) issues.push({msg:'KICK WRIST BACK - EXTEND FULLY!',   sev:'warn'});
+    else              issues.push({msg:'ARM BENT - KICK BACK!',             sev:'warn'});
   }
-  return{valid:true,a1:ea,a2:ta,issues,grade,reps:s.reps}
+
+  return {valid:true, a1:ea, a2:ta, issues, grade, reps:s.reps};
 }
 
 function analyzeCalfRaise(lm){
@@ -1044,7 +1070,7 @@ const EX_CFG={
   db_curl:      {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
   incline_curl: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
   hammer_curl2: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
-  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'WRIST ELEV', u1:'',  a2:null},
+  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'ELBOW ANG',         a2:null},
   tri_kick:     {fn:analyzeTricepKickback,              a1:'ELBOW ANG',  a2:'TORSO DEG'},
   sq_press:     {fn:lm=>analyzeSquat(lm,'sqpress'),    a1:'KNEE ANG',   a2:'ELBOW ANG'},
   deadlift:     {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
