@@ -603,17 +603,19 @@ function analyzeFloorPress(lm, cg){
   // Form checks
   const wristBehind = ok(W,.22)&&ok(E,.22) && (W.x - E.x) > 0.12;
   const flare    = ok(LE,.22)&&ok(LS,.22) && Math.abs(LE.x - LS.x) > 0.28;
-  const cgFlare  = cg && ok(LE,.22)&&ok(RE,.22)&&ok(LS,.22)&&ok(RS,.22) &&
-                   Math.abs(LE.x-RE.x) > Math.abs(LS.x-RS.x)*0.7;
+  // Close-grip form: elbow angle at bottom should be tight (< 90°). Not applicable mid-press.
+  const cgElbowLoose = cg && ea < 999 && ea > 95 && wristElev < 0.14;
 
   const s = repState[currentEx];
-  // BOTTOM: wrist near shoulder level — elbows back on floor
-  if(wristElev < 0.06) tryEnterPhase(s,'down');
+  // BOTTOM: wrist near shoulder level — elbows back on floor / tucked
+  // Close-grip keeps elbows tighter so wrist never drops as low → use a looser threshold
+  const bottomThresh = cg ? 0.12 : 0.06;
+  if(wristElev < bottomThresh) tryEnterPhase(s,'down');
   // TOP: wrist well above shoulder — arm extended
   if(wristElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
 
   const issues=[]; let grade='A';
-  if(cgFlare)                  { issues.push({msg:'ELBOWS CLOSER - CLOSE GRIP PRESS',  sev:'warn'}); grade='B'; }
+  if(cgElbowLoose)              { issues.push({msg:'TUCK ELBOWS IN - CLOSE GRIP',           sev:'warn'}); grade='B'; }
   else if(flare && !cg)        { issues.push({msg:'ELBOWS SLIGHTLY TOO WIDE - ANGLE IN', sev:'warn'}); grade='B'; }
   if(wristBehind)              { issues.push({msg:'WRISTS FORWARD - KEEP ABOVE ELBOWS', sev:'warn'}); if(grade==='A')grade='B'; }
 
