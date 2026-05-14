@@ -526,11 +526,15 @@ function analyzeSquat(lm,variant){
   if(kneeAng<105) tryEnterPhase(s,'down');
   if(kneeAng>162&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
   const issues=[];let grade='A';
-  const maxLean=variant==='goblet'?38:48;
+  // backAng from FRONT camera = lateral hip sway (not forward lean — that's invisible from FRONT)
+  if(backAng>14){issues.push({msg:'STAY CENTERED - HIPS SHIFTING',sev:'warn'});if(grade==='A')grade='B'}
   if(kneeAng<110){
-    if(backAng>maxLean){issues.push({msg:'CHEST UP - BACK ROUNDING',sev:'bad'});grade='C'}
     if(cave){issues.push({msg:'PUSH KNEES OUT - CAVING IN',sev:'bad'});if(grade==='A')grade='B'}
-    if(variant==='sumo'){const sw=ok(LS)&&ok(RS)?Math.abs(LS.x-RS.x):0.1;if(kW<aW*0.55)issues.push({msg:'WIDEN STANCE MORE',sev:'warn'})}
+    if(variant==='sumo'){
+      const sw=ok(LS)&&ok(RS)?Math.abs(LS.x-RS.x):0.1;
+      // Sumo stance: ankles should be outside shoulder width
+      if(aW<sw*0.85)issues.push({msg:'WIDEN STANCE - FEET OUTSIDE SHOULDERS',sev:'warn'});
+    }
     if(!issues.length)issues.push({msg:'GOOD DEPTH - DRIVE UP!',sev:'good'})
   }else if(kneeAng<160){issues.push({msg:'DESCENDING - BRACE CORE',sev:'warn'});grade='B'}
   else issues.push({msg:'STANDING - BEGIN SQUAT',sev:'good'})
@@ -929,10 +933,11 @@ function analyzeLunge(lm){
   if(ka<100) tryEnterPhase(s,'down');
   if(ka>155&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
   const issues=[];let grade='A';
-  if(back>22){issues.push({msg:'CHEST UP - TORSO LEANING',sev:'warn'});grade='B'}
+  // back = lateral hip sway from FRONT camera — hip dropping sideways is a real lunge error
+  if(back>12){issues.push({msg:'KEEP HIPS LEVEL - STAY CENTERED',sev:'warn'});if(grade==='A')grade='B'}
   if(!issues.length){
     if(ka<90)issues.push({msg:'GOOD DEPTH - DRIVE BACK UP',sev:'good'})
-    else if(ka<150)issues.push({msg:'STEP BACK AND LUNGE',sev:'warn'})
+    else if(ka<150)issues.push({msg:'STEP BACK AND LUNGE DEEP',sev:'warn'})
     else issues.push({msg:'STANDING - STEP BACK',sev:'good'})
   }
   return{valid:true,a1:ka,a2:back,issues,grade,reps:s.reps}
