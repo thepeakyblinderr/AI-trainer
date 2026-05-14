@@ -539,54 +539,150 @@ function analyzeSquat(lm,variant){
   return{valid:true,a1:kneeAng,a2:a2,issues,grade,reps:s.reps}
 }
 
-function analyzeCurl(lm){
-  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+function analyzeCurl(lm, opts){
+  // opts.single = true → conc curl style (one arm works, other rests bent)
+  //                      Track only the most-visible arm; skip both-arm drift checks.
+  const single = opts && opts.single === true;
+  const [LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
   if(!ok(LS)&&!ok(RS))return{valid:false,msg:'FACE CAMERA - ARMS VISIBLE',grade:'?'};
-  const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
-  const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
-  const ea=Math.min(LA,RA)===999?null:Math.round(Math.min(LA,RA));
-  if(!ea)return{valid:false,msg:'ELBOW NOT VISIBLE - ADJUST',grade:'?'};
-  const lD=ok(LS)&&ok(LE)&&Math.abs(LE.x-LS.x)>0.18;
-  const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
+
+  let ea, drift=false;
+  if(single){
+    const [S,E,W] = bestArm(lm);
+    const ang = sa(S,E,W);
+    if(ang===null) return {valid:false,msg:'ELBOW NOT VISIBLE - ADJUST', grade:'?'};
+    ea = Math.round(ang);
+    // No drift check — elbow is braced on knee, won't swing
+  } else {
+    const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
+    const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
+    ea = Math.min(LA,RA)===999 ? null : Math.round(Math.min(LA,RA));
+    if(!ea) return {valid:false,msg:'ELBOW NOT VISIBLE - ADJUST', grade:'?'};
+    const lD=ok(LS)&&ok(LE)&&Math.abs(LE.x-LS.x)>0.18;
+    const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
+    drift = lD || rD;
+  }
+
   const s=repState[currentEx];
   if(ea<55) tryEnterPhase(s,'up');
-  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const issues=[];let grade='A';
-  if(lD||rD){issues.push({msg:"ELBOWS IN - DON'T SWING",sev:'warn'});grade='B'}
+  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(drift){ issues.push({msg:"ELBOWS IN - DON'T SWING", sev:'warn'}); grade='B'; }
   if(!issues.length){
-    if(ea<55)issues.push({msg:'PEAK - SQUEEZE!',sev:'good'})
-    else if(ea<130)issues.push({msg:'CURLING - SLOW & CONTROLLED',sev:'warn'})
-    else issues.push({msg:'FULL EXTENSION - GREAT ROM',sev:'good'})
+    if(ea<55)       issues.push({msg:'PEAK - SQUEEZE BICEP!',          sev:'good'});
+    else if(ea<130) issues.push({msg:'CURLING - SLOW & CONTROLLED',     sev:'warn'});
+    else            issues.push({msg:'FULL EXTENSION - STRETCH BICEP',  sev:'good'});
   }
-  return{valid:true,a1:ea,a2:null,issues,grade,reps:s.reps}
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
 }
 
-function analyzeHinge(lm,variant){
-  const ta=torsoAngle(lm);
-  if(ta===null)return{valid:false,msg:'STAND SIDEWAYS TO CAMERA',grade:'?'};
-  const[S,E,W]=bestArm(lm);const ea=sa(S,E,W);
-  const s=repState[currentEx];const issues=[];let grade='A';
-  if(ta>82){issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!',sev:'bad'});grade='C'}
-  if(variant==='row'){
-    if(ta<22){issues.push({msg:'HINGE MORE - NEED 45 DEG LEAN',sev:'warn'});if(grade==='A')grade='B'}
-    if(ea!==null){
-      if(ea<72) tryEnterPhase(s,'up');
-      if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-      if(!issues.length){
-        if(ea<78)issues.push({msg:'TOP OF ROW - SQUEEZE BACK!',sev:'good'})
-        else if(ea<145)issues.push({msg:'ROW THE WEIGHT UP',sev:'warn'})
-        else issues.push({msg:'ARM EXTENDED - PULL!',sev:'good'})
-      }
-    }
-  }else{
-    if(ta>35) tryEnterPhase(s,'down');
-    if(ta<8&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+function analyzeBentRow(lm){
+  // Camera: SIDE. Both arms row simultaneously. Torso hinged ~35-65° forward.
+  // Rep signal: elbow angle (extended at bottom, sharp bend at top of row).
+  // Start phase: 'down' (NEEDS_DOWN_START) — arm extended at rest.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'STAND SIDEWAYS - HINGE FORWARD', grade:'?'};
+  const [S,E,W] = bestArm(lm);
+  const ea = sa(S,E,W);
+
+  const s = repState[currentEx];
+  const issues=[]; let grade='A';
+
+  // Posture
+  if(ta > 80){ issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!', sev:'bad'}); grade='C'; }
+  if(ta < 28){ issues.push({msg:'HINGE MORE - LEAN 45° FORWARD',  sev:'warn'}); if(grade==='A') grade='B'; }
+
+  // Rep counting
+  if(ea !== null){
+    if(ea < 78) tryEnterPhase(s,'up');
+    if(ea > 150 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
     if(!issues.length){
-      if(ta>35)issues.push({msg:'HINGED - DRIVE HIPS TO STAND',sev:'good'})
-      else issues.push({msg:'STANDING TALL - HINGE FORWARD',sev:'good'})
+      if(ea < 78)       issues.push({msg:'TOP - SQUEEZE SHOULDER BLADES!',  sev:'good'});
+      else if(ea < 130) issues.push({msg:'PULL TO RIBS - LEAD WITH ELBOWS', sev:'warn'});
+      else              issues.push({msg:'ARMS HANGING - INITIATE PULL!',   sev:'good'});
     }
   }
-  return{valid:true,a1:ta,a2:ea,issues,grade,reps:s.reps}
+  return {valid:true, a1:ta, a2:ea, issues, grade, reps:s.reps};
+}
+
+function analyzeSingleRow(lm){
+  // Camera: SIDE. ONE arm rows while the other braces (on bench/knee).
+  // Torso is near horizontal (~60-90° lean) — that is correct form,
+  // not "back rounding". Track the working (most visible) arm only.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'SIDE-ON - BRACE ON BENCH/KNEE', grade:'?'};
+  const [S,E,W] = bestArm(lm);
+  const ea = sa(S,E,W);
+
+  const s = repState[currentEx];
+  const issues=[]; let grade='A';
+
+  // Posture — single-arm row needs torso near horizontal, no rounding warning
+  if(ta < 40){ issues.push({msg:'LEAN MORE - TORSO PARALLEL TO FLOOR', sev:'warn'}); grade='B'; }
+
+  if(ea !== null){
+    if(ea < 75) tryEnterPhase(s,'up');
+    if(ea > 150 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+    if(!issues.length){
+      if(ea < 75)       issues.push({msg:'TOP - DRIVE ELBOW HIGH PAST RIBS!', sev:'good'});
+      else if(ea < 130) issues.push({msg:'ROW TO HIP - LEAD WITH ELBOW',      sev:'warn'});
+      else              issues.push({msg:'ARM HANGING - PULL TO HIP!',         sev:'good'});
+    }
+  }
+  return {valid:true, a1:ta, a2:ea, issues, grade, reps:s.reps};
+}
+
+function analyzeRDL(lm, variant){
+  // Camera: SIDE. Hip hinge with dumbbell descent.
+  //   stiff:    knees stay nearly locked, deep hinge to mid-shin
+  //   rdl:      slight knee bend, hinge to just below knees
+  //   deadlift: more knee bend, dumbbells to floor
+  //
+  // Rep requires REAL depth — previously ta > 35 counted shallow half-reps.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'STAND SIDEWAYS - START UPRIGHT', grade:'?'};
+
+  // Knee angle (for stiff-leg check + form feedback)
+  const [LH,RH,LK,RK,LA,RA] = [lm[23],lm[24],lm[25],lm[26],lm[27],lm[28]];
+  const hM = ok(LH)&&ok(RH) ? mid(LH,RH) : (ok(LH)?LH:RH);
+  const kM = ok(LK)&&ok(RK) ? mid(LK,RK) : (ok(LK)?LK:RK);
+  const aM = ok(LA)&&ok(RA) ? mid(LA,RA) : (ok(LA)?LA:RA);
+  const kneeAng = (ok(hM,.25)&&ok(kM,.25)&&ok(aM,.25))
+    ? Math.round(calcAngle(hM,kM,aM)) : null;
+
+  // Depth threshold per variant (degrees of forward lean to count 'down')
+  const depth = variant==='stiff'    ? 60
+              : variant==='deadlift' ? 70
+              :                        55;   // rdl
+  // Max knee bend allowed (kneeAng below this = warning for stiff/rdl)
+  const minKnee = variant==='stiff'    ? 158
+                : variant==='deadlift' ? 110
+                :                        145; // rdl
+
+  const s = repState[currentEx];
+  const issues=[]; let grade='A';
+
+  if(ta > 88){ issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!', sev:'bad'}); grade='C'; }
+  if(variant==='stiff' && kneeAng!==null && kneeAng < minKnee && ta > 25){
+    issues.push({msg:'KEEP LEGS STRAIGHT - STIFF-LEG VARIANT', sev:'warn'});
+    if(grade==='A') grade='B';
+  }
+
+  // Rep counting — must hit real depth
+  if(ta > depth) tryEnterPhase(s,'down');
+  if(ta < 12 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  if(!issues.length){
+    if(ta > depth)    issues.push({msg:'DEEP HINGE - DRIVE HIPS TO STAND!', sev:'good'});
+    else if(ta > 25)  issues.push({msg:'HINGE DEEPER - DUMBBELLS TO MID-SHIN', sev:'warn'});
+    else              issues.push({msg:'STANDING TALL - HINGE FORWARD',     sev:'good'});
+  }
+
+  return {valid:true, a1:ta, a2:kneeAng, issues, grade, reps:s.reps};
 }
 
 // ══════════════════════════════════════════════
@@ -1217,13 +1313,13 @@ const EX_CFG={
   pushup:       {fn:analyzePushup,                     a1:'ELBOW ANG',  a2:null},
   skull_crusher:{fn:analyzeSkullCrusher,               a1:'ELBOW ANG',  a2:null},
   ohd_tri_ext:  {fn:analyzeOHDTricepExt,              a1:'ELBOW ANG',  a2:'BACK DEG'},
-  bent_row:     {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG',  a2:'ELBOW ANG'},
-  single_row:   {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG',  a2:'ELBOW ANG'},
-  stiff_rdl:    {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
-  hammer_curl:  {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
-  conc_curl:    {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  bent_row:     {fn:analyzeBentRow,                     a1:'TORSO DEG',  a2:'ELBOW ANG'},
+  single_row:   {fn:analyzeSingleRow,                   a1:'TORSO DEG',  a2:'ELBOW ANG'},
+  stiff_rdl:    {fn:lm=>analyzeRDL(lm,'stiff'),         a1:'TORSO DEG',  a2:'KNEE ANG'},
+  hammer_curl:  {fn:analyzeCurl,                        a1:'ELBOW ANG',  a2:null},
+  conc_curl:    {fn:lm=>analyzeCurl(lm,{single:true}),  a1:'ELBOW ANG',  a2:null},
   goblet_sq:    {fn:lm=>analyzeSquat(lm,'goblet'),     a1:'KNEE ANG',   a2:'BACK DEG'},
-  rom_dl:       {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  rom_dl:       {fn:lm=>analyzeRDL(lm,'rdl'),          a1:'TORSO DEG',  a2:'KNEE ANG'},
   rev_lunge:    {fn:analyzeLunge,                      a1:'KNEE ANG',   a2:'TORSO DEG'},
   sumo_sq:      {fn:lm=>analyzeSquat(lm,'sumo'),       a1:'KNEE ANG',   a2:'BACK DEG'},
   calf_raise:   {fn:analyzeCalfRaise,                  a1:'BODY LEAN',  a2:null},
@@ -1238,7 +1334,7 @@ const EX_CFG={
   floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'ELBOW ANG',         a2:null},
   tri_kick:     {fn:analyzeTricepKickback,              a1:'ELBOW ANG',  a2:'TORSO DEG'},
   sq_press:     {fn:lm=>analyzeSquat(lm,'sqpress'),    a1:'KNEE ANG',   a2:'ELBOW ANG'},
-  deadlift:     {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  deadlift:     {fn:lm=>analyzeRDL(lm,'deadlift'),     a1:'TORSO DEG',  a2:'KNEE ANG'},
   push_press:   {fn:analyzeOHDPress,                   a1:'ELBOW ANG',  a2:'BACK DEG'},
   renegade_row: {fn:analyzeRenegadeRow,                 a1:'ELBOW ANG',  a2:null},
   farmers_carry:{fn:analyzePosture,                    a1:'BODY LEAN',  a2:'SHLDR ASYM', u2:''},
@@ -1339,13 +1435,20 @@ function readyCheck(id, lm){
     }
   }
 
-  // Curl family: arms must be hanging down (not pre-curled)
-  const CURL = new Set(['db_curl','hammer_curl','hammer_curl2','conc_curl','rev_curl','zottman_curl']);
-  if(CURL.has(id)){
+  // Curl family — two flavours:
+  //   two-arm curls: BOTH arms must be hanging down (not pre-curled)
+  //   single-arm curl (conc): ONE arm must be hanging (working arm),
+  //                            the other rests bent on lap/side
+  const TWO_ARM_CURL    = new Set(['db_curl','hammer_curl','hammer_curl2','rev_curl','zottman_curl']);
+  const SINGLE_ARM_CURL = new Set(['conc_curl']);
+  if(TWO_ARM_CURL.has(id) || SINGLE_ARM_CURL.has(id)){
     const la=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):180;
     const ra=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):180;
-    const minA=Math.min(la,ra);
-    if(minA<140) return {pass:false, hint:'STRAIGHTEN ARMS — HANG THEM DOWN'};
+    if(TWO_ARM_CURL.has(id)){
+      if(Math.min(la,ra) < 140) return {pass:false, hint:'STRAIGHTEN BOTH ARMS — HANG THEM DOWN'};
+    } else {
+      if(Math.max(la,ra) < 140) return {pass:false, hint:'EXTEND WORKING ARM DOWN'};
+    }
   }
 
   return {pass:true, hint:'POSITION CONFIRMED — HOLD STILL'};
