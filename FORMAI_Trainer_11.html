@@ -569,7 +569,9 @@ function analyzeCurl(lm, opts){
 
   const s=repState[currentEx];
   if(ea<55) tryEnterPhase(s,'up');
-  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down')) countRep(s);
+  // single (conc curl): elbow on knee limits extension to ~120-135° — 155° unreachable
+  const bottomThresh = single ? 120 : 155;
+  if(ea>bottomThresh&&s.phase==='up'&&tryEnterPhase(s,'down')) countRep(s);
 
   const issues=[]; let grade='A';
   if(drift){ issues.push({msg:"ELBOWS IN - DON'T SWING", sev:'warn'}); grade='B'; }
@@ -625,7 +627,7 @@ function analyzeSingleRow(lm){
   const issues=[]; let grade='A';
 
   // Posture — single-arm row needs torso near horizontal, no rounding warning
-  if(ta < 40){ issues.push({msg:'LEAN MORE - TORSO PARALLEL TO FLOOR', sev:'warn'}); grade='B'; }
+  if(ta < 55){ issues.push({msg:'LEAN MORE - TORSO PARALLEL TO FLOOR', sev:'warn'}); grade='B'; }
 
   if(ea !== null){
     if(ea < 75) tryEnterPhase(s,'up');
@@ -1407,8 +1409,19 @@ function readyCheck(id, lm){
     return {pass:true, hint:'POSITION DETECTED — HOLD STILL'};
   }
 
+  // Single-arm row: start already bent over with arm hanging (torso ~70-90°)
+  if(id==='single_row'){
+    const ta=torsoAngle(lm);
+    if(ta===null) return {pass:false, hint:'STAND SIDEWAYS - LEAN ON BENCH'};
+    if(ta < 40) return {pass:false, hint:'LEAN FORWARD - TORSO PARALLEL TO FLOOR'};
+    const [S,E,W]=bestArm(lm);
+    const armAng=sa(S,E,W)??0;
+    if(armAng < 130) return {pass:false, hint:'LET ARM HANG - EXTEND FULLY DOWN'};
+    return {pass:true, hint:'BENT-OVER POSITION CONFIRMED'};
+  }
+
   // Hinge/side-camera exercises — standing upright to start
-  const HINGE = new Set(['bent_row','single_row','stiff_rdl','rom_dl','deadlift','tri_kick','front_raise','calf_raise']);
+  const HINGE = new Set(['bent_row','stiff_rdl','rom_dl','deadlift','tri_kick','front_raise','calf_raise']);
   if(HINGE.has(id)){
     const ta=torsoAngle(lm);
     if(ta===null) return {pass:false, hint:'STAND SIDEWAYS TO CAMERA'};
