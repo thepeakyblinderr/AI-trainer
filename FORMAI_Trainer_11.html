@@ -177,6 +177,10 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
 .rest-cta:hover{background:#0055dd;box-shadow:0 6px 22px rgba(0,102,255,.45)}
 .rest-cta.finish{background:#22aa55;box-shadow:0 4px 18px rgba(34,170,85,.35)}
 .rest-cta.finish:hover{background:#1a9944}
+.day-divider{width:1px;height:28px;background:#ddd;margin:0 4px;flex-shrink:0}
+.day-btn.extras{border-color:#2a9d6a;color:#2a9d6a}
+.day-btn.extras:hover{background:#f0faf5;border-color:#2a9d6a}
+.day-btn.extras.on{background:#2a9d6a;border-color:#2a9d6a;color:#fff}
 #rest-ai-summary{
   background:rgba(0,102,255,.07);border:1px solid rgba(0,102,255,.2);
   border-radius:6px;padding:12px 16px;font-size:.78rem;line-height:1.6;
@@ -207,6 +211,8 @@ body{display:flex;flex-direction:column;font-family:'Share Tech Mono',monospace}
   <button class="day-btn"    onclick="selectDay(this,'thu')">THU<span class="day-sub">SHOULDERS</span></button>
   <button class="day-btn"    onclick="selectDay(this,'fri')">FRI<span class="day-sub">ARMS</span></button>
   <button class="day-btn"    onclick="selectDay(this,'sat')">SAT<span class="day-sub">FULL BODY</span></button>
+  <div class="day-divider"></div>
+  <button class="day-btn extras" onclick="selectDay(this,'extras')">EXTRAS<span class="day-sub">CORE·ARMS</span></button>
 </div>
 
 <div id="exbar"></div>
@@ -326,6 +332,14 @@ const WORKOUT = {
     {id:'renegade_row',  label:'RENEGADE ROW',      sets:3,reps:8,cam:'SIDE',note:'Plank position, camera from side'},
     {id:'farmers_carry', label:"FARMER'S CARRY",    sets:3,reps:8,cam:'FRONT',note:'Face camera, walk upright'},
   ]},
+  extras:{label:'CORE & FOREARMS',exercises:[
+    {id:'plank',         label:'PLANK',             sets:3,reps:'30s', cam:'SIDE', note:'Side-on, full body visible — hold position'},
+    {id:'crunch',        label:'CRUNCHES',          sets:3,reps:8,     cam:'SIDE', note:'Lie on back, camera from your side'},
+    {id:'leg_raise',     label:'LEG RAISES',        sets:3,reps:8,     cam:'SIDE', note:'Lie flat, camera from your side'},
+    {id:'mtn_climber',   label:'MOUNTAIN CLIMBERS', sets:3,reps:8,     cam:'SIDE', note:'Plank position, camera from side'},
+    {id:'rev_curl',      label:'REVERSE CURL',      sets:3,reps:8,     cam:'FRONT',note:'Face camera, palms-down grip'},
+    {id:'zottman_curl',  label:'ZOTTMAN CURL',      sets:3,reps:8,     cam:'FRONT',note:'Face camera, rotate palms at top'},
+  ]},
 };
 
 let currentEx='floor_press', voiceOn=true, lastMsg='', lastMsgAt=0, lmCache=[];
@@ -341,6 +355,7 @@ const NEEDS_DOWN_START=new Set([
   'shrug',                          // shrug: shoulders dropped at rest
   'tri_kick',                       // kickback: arm bent at rest
   'renegade_row',                   // renegade: plank = arm extended
+  'rev_curl','zottman_curl',        // curls: arm extended at rest
 ]);
 function initPhase(id){ return NEEDS_DOWN_START.has(id)?'down':'up'; }
 
@@ -511,11 +526,15 @@ function analyzeSquat(lm,variant){
   if(kneeAng<105) tryEnterPhase(s,'down');
   if(kneeAng>162&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
   const issues=[];let grade='A';
-  const maxLean=variant==='goblet'?38:48;
+  // backAng from FRONT camera = lateral hip sway (not forward lean — that's invisible from FRONT)
+  if(backAng>14){issues.push({msg:'STAY CENTERED - HIPS SHIFTING',sev:'warn'});if(grade==='A')grade='B'}
   if(kneeAng<110){
-    if(backAng>maxLean){issues.push({msg:'CHEST UP - BACK ROUNDING',sev:'bad'});grade='C'}
     if(cave){issues.push({msg:'PUSH KNEES OUT - CAVING IN',sev:'bad'});if(grade==='A')grade='B'}
-    if(variant==='sumo'){const sw=ok(LS)&&ok(RS)?Math.abs(LS.x-RS.x):0.1;if(kW<aW*0.55)issues.push({msg:'WIDEN STANCE MORE',sev:'warn'})}
+    if(variant==='sumo'){
+      const sw=ok(LS)&&ok(RS)?Math.abs(LS.x-RS.x):0.1;
+      // Sumo stance: ankles should be outside shoulder width
+      if(aW<sw*0.85)issues.push({msg:'WIDEN STANCE - FEET OUTSIDE SHOULDERS',sev:'warn'});
+    }
     if(!issues.length)issues.push({msg:'GOOD DEPTH - DRIVE UP!',sev:'good'})
   }else if(kneeAng<160){issues.push({msg:'DESCENDING - BRACE CORE',sev:'warn'});grade='B'}
   else issues.push({msg:'STANDING - BEGIN SQUAT',sev:'good'})
@@ -524,54 +543,152 @@ function analyzeSquat(lm,variant){
   return{valid:true,a1:kneeAng,a2:a2,issues,grade,reps:s.reps}
 }
 
-function analyzeCurl(lm){
-  const[LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+function analyzeCurl(lm, opts){
+  // opts.single = true → conc curl style (one arm works, other rests bent)
+  //                      Track only the most-visible arm; skip both-arm drift checks.
+  const single = opts && opts.single === true;
+  const [LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
   if(!ok(LS)&&!ok(RS))return{valid:false,msg:'FACE CAMERA - ARMS VISIBLE',grade:'?'};
-  const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
-  const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
-  const ea=Math.min(LA,RA)===999?null:Math.round(Math.min(LA,RA));
-  if(!ea)return{valid:false,msg:'ELBOW NOT VISIBLE - ADJUST',grade:'?'};
-  const lD=ok(LS)&&ok(LE)&&Math.abs(LE.x-LS.x)>0.18;
-  const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
+
+  let ea, drift=false;
+  if(single){
+    const [S,E,W] = bestArm(lm);
+    const ang = sa(S,E,W);
+    if(ang===null) return {valid:false,msg:'ELBOW NOT VISIBLE - ADJUST', grade:'?'};
+    ea = Math.round(ang);
+    // No drift check — elbow is braced on knee, won't swing
+  } else {
+    const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
+    const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
+    ea = Math.min(LA,RA)===999 ? null : Math.round(Math.min(LA,RA));
+    if(!ea) return {valid:false,msg:'ELBOW NOT VISIBLE - ADJUST', grade:'?'};
+    const lD=ok(LS)&&ok(LE)&&Math.abs(LE.x-LS.x)>0.18;
+    const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
+    drift = lD || rD;
+  }
+
   const s=repState[currentEx];
   if(ea<55) tryEnterPhase(s,'up');
-  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const issues=[];let grade='A';
-  if(lD||rD){issues.push({msg:"ELBOWS IN - DON'T SWING",sev:'warn'});grade='B'}
+  // single (conc curl): elbow on knee limits extension to ~120-135° — 155° unreachable
+  const bottomThresh = single ? 120 : 155;
+  if(ea>bottomThresh&&s.phase==='up'&&tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(drift){ issues.push({msg:"ELBOWS IN - DON'T SWING", sev:'warn'}); grade='B'; }
   if(!issues.length){
-    if(ea<55)issues.push({msg:'PEAK - SQUEEZE!',sev:'good'})
-    else if(ea<130)issues.push({msg:'CURLING - SLOW & CONTROLLED',sev:'warn'})
-    else issues.push({msg:'FULL EXTENSION - GREAT ROM',sev:'good'})
+    if(ea<55)       issues.push({msg:'PEAK - SQUEEZE BICEP!',          sev:'good'});
+    else if(ea<130) issues.push({msg:'CURLING - SLOW & CONTROLLED',     sev:'warn'});
+    else            issues.push({msg:'FULL EXTENSION - STRETCH BICEP',  sev:'good'});
   }
-  return{valid:true,a1:ea,a2:null,issues,grade,reps:s.reps}
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
 }
 
-function analyzeHinge(lm,variant){
-  const ta=torsoAngle(lm);
-  if(ta===null)return{valid:false,msg:'STAND SIDEWAYS TO CAMERA',grade:'?'};
-  const[S,E,W]=bestArm(lm);const ea=sa(S,E,W);
-  const s=repState[currentEx];const issues=[];let grade='A';
-  if(ta>82){issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!',sev:'bad'});grade='C'}
-  if(variant==='row'){
-    if(ta<22){issues.push({msg:'HINGE MORE - NEED 45 DEG LEAN',sev:'warn'});if(grade==='A')grade='B'}
-    if(ea!==null){
-      if(ea<72) tryEnterPhase(s,'up');
-      if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-      if(!issues.length){
-        if(ea<78)issues.push({msg:'TOP OF ROW - SQUEEZE BACK!',sev:'good'})
-        else if(ea<145)issues.push({msg:'ROW THE WEIGHT UP',sev:'warn'})
-        else issues.push({msg:'ARM EXTENDED - PULL!',sev:'good'})
-      }
-    }
-  }else{
-    if(ta>35) tryEnterPhase(s,'down');
-    if(ta<8&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
+function analyzeBentRow(lm){
+  // Camera: SIDE. Both arms row simultaneously. Torso hinged ~35-65° forward.
+  // Rep signal: elbow angle (extended at bottom, sharp bend at top of row).
+  // Start phase: 'down' (NEEDS_DOWN_START) — arm extended at rest.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'STAND SIDEWAYS - HINGE FORWARD', grade:'?'};
+  const [S,E,W] = bestArm(lm);
+  const ea = sa(S,E,W);
+
+  const s = repState[currentEx];
+  const issues=[]; let grade='A';
+
+  // Posture
+  if(ta > 80){ issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!', sev:'bad'}); grade='C'; }
+  if(ta < 28){ issues.push({msg:'HINGE MORE - LEAN 45° FORWARD',  sev:'warn'}); if(grade==='A') grade='B'; }
+
+  // Rep counting
+  if(ea !== null){
+    if(ea < 78) tryEnterPhase(s,'up');
+    if(ea > 150 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
     if(!issues.length){
-      if(ta>35)issues.push({msg:'HINGED - DRIVE HIPS TO STAND',sev:'good'})
-      else issues.push({msg:'STANDING TALL - HINGE FORWARD',sev:'good'})
+      if(ea < 78)       issues.push({msg:'TOP - SQUEEZE SHOULDER BLADES!',  sev:'good'});
+      else if(ea < 130) issues.push({msg:'PULL TO RIBS - LEAD WITH ELBOWS', sev:'warn'});
+      else              issues.push({msg:'ARMS HANGING - INITIATE PULL!',   sev:'good'});
     }
   }
-  return{valid:true,a1:ta,a2:ea,issues,grade,reps:s.reps}
+  return {valid:true, a1:ta, a2:ea, issues, grade, reps:s.reps};
+}
+
+function analyzeSingleRow(lm){
+  // Camera: SIDE. ONE arm rows while the other braces (on bench/knee).
+  // Torso is near horizontal (~60-90° lean) — that is correct form,
+  // not "back rounding". Track the working (most visible) arm only.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'SIDE-ON - BRACE ON BENCH/KNEE', grade:'?'};
+  const [S,E,W] = bestArm(lm);
+  const ea = sa(S,E,W);
+
+  const s = repState[currentEx];
+  const issues=[]; let grade='A';
+
+  // Posture — single-arm row needs torso near horizontal, no rounding warning
+  if(ta < 55){ issues.push({msg:'LEAN MORE - TORSO PARALLEL TO FLOOR', sev:'warn'}); grade='B'; }
+
+  if(ea !== null){
+    if(ea < 75) tryEnterPhase(s,'up');
+    if(ea > 150 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+    if(!issues.length){
+      if(ea < 75)       issues.push({msg:'TOP - DRIVE ELBOW HIGH PAST RIBS!', sev:'good'});
+      else if(ea < 130) issues.push({msg:'ROW TO HIP - LEAD WITH ELBOW',      sev:'warn'});
+      else              issues.push({msg:'ARM HANGING - PULL TO HIP!',         sev:'good'});
+    }
+  }
+  return {valid:true, a1:ta, a2:ea, issues, grade, reps:s.reps};
+}
+
+function analyzeRDL(lm, variant){
+  // Camera: SIDE. Hip hinge with dumbbell descent.
+  //   stiff:    knees stay nearly locked, deep hinge to mid-shin
+  //   rdl:      slight knee bend, hinge to just below knees
+  //   deadlift: more knee bend, dumbbells to floor
+  //
+  // Rep requires REAL depth — previously ta > 35 counted shallow half-reps.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'STAND SIDEWAYS - START UPRIGHT', grade:'?'};
+
+  // Knee angle (for stiff-leg check + form feedback)
+  const [LH,RH,LK,RK,LA,RA] = [lm[23],lm[24],lm[25],lm[26],lm[27],lm[28]];
+  const hM = ok(LH)&&ok(RH) ? mid(LH,RH) : (ok(LH)?LH:RH);
+  const kM = ok(LK)&&ok(RK) ? mid(LK,RK) : (ok(LK)?LK:RK);
+  const aM = ok(LA)&&ok(RA) ? mid(LA,RA) : (ok(LA)?LA:RA);
+  const kneeAng = (ok(hM,.25)&&ok(kM,.25)&&ok(aM,.25))
+    ? Math.round(calcAngle(hM,kM,aM)) : null;
+
+  // Depth threshold per variant (degrees of forward lean to count 'down')
+  const depth = variant==='stiff'    ? 60
+              : variant==='deadlift' ? 70
+              :                        55;   // rdl
+  // Max knee bend allowed (kneeAng below this = warning for stiff/rdl)
+  const minKnee = variant==='stiff'    ? 158
+                : variant==='deadlift' ? 110
+                :                        145; // rdl
+
+  const s = repState[currentEx];
+  const issues=[]; let grade='A';
+
+  if(ta > 88){ issues.push({msg:'BACK ROUNDING - NEUTRAL SPINE!', sev:'bad'}); grade='C'; }
+  if(variant==='stiff' && kneeAng!==null && kneeAng < minKnee && ta > 25){
+    issues.push({msg:'KEEP LEGS STRAIGHT - STIFF-LEG VARIANT', sev:'warn'});
+    if(grade==='A') grade='B';
+  }
+
+  // Rep counting — must hit real depth
+  if(ta > depth) tryEnterPhase(s,'down');
+  if(ta < 12 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  if(!issues.length){
+    if(ta > depth)    issues.push({msg:'DEEP HINGE - DRIVE HIPS TO STAND!', sev:'good'});
+    else if(ta > 25)  issues.push({msg:'HINGE DEEPER - DUMBBELLS TO MID-SHIN', sev:'warn'});
+    else              issues.push({msg:'STANDING TALL - HINGE FORWARD',     sev:'good'});
+  }
+
+  return {valid:true, a1:ta, a2:kneeAng, issues, grade, reps:s.reps};
 }
 
 // ══════════════════════════════════════════════
@@ -579,54 +696,61 @@ function analyzeHinge(lm,variant){
 // ══════════════════════════════════════════════
 
 function analyzeFloorPress(lm, cg){
-  // Camera: SIDE.
-  // REP COUNTING — wrist vertical movement (more stable than elbow angle when lying down)
-  // When pressing up: wrist rises toward ceiling → wristElev increases
-  // When lowering:    elbows return to floor   → wristElev decreases
+  // Camera: SIDE. Person lies on back.
   //
-  // wristElev = S.y - W.y  (positive = wrist higher than shoulder = arm pressing up)
-  // At BOTTOM (elbows on floor): wristElev ~0.02-0.06 (wrist barely above shoulder)
-  // At TOP    (arms extended):   wristElev ~0.20-0.30 (wrist well above shoulder)
+  // Regular press — wrist elevation signal:
+  //   BOTTOM (elbows touch floor): wristElev ~0.02-0.06
+  //   TOP    (arms extended):      wristElev ~0.20-0.30
+  //
+  // Close-grip press — elbow angle signal (wrist never drops as low because
+  //   elbows stay tucked, so wristElev threshold is unreliable):
+  //   BOTTOM (elbows bent, tucked to chest): ea ~80-95°
+  //   TOP    (arms extended):                ea ~160-175°
 
   const [LS,RS,LE,RE,LW,RW] = [lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
   const [S,E,W] = bestArm(lm);
   if(!ok(S,.22)||!ok(W,.22)) return {valid:false, msg:'LIE DOWN - CAMERA FROM YOUR SIDE', grade:'?'};
 
-  // Primary rep signal: wrist elevation above shoulder
   const wristElev = S.y - W.y;
-
-  // Secondary form signal: elbow angle (not used for rep counting, only form feedback)
   const la = (ok(LS,.22)&&ok(LE,.22)&&ok(LW,.22)) ? calcAngle(LS,LE,LW) : 999;
   const ra = (ok(RS,.22)&&ok(RE,.22)&&ok(RW,.22)) ? calcAngle(RS,RE,RW) : 999;
   const ea = Math.round(la<ra && la<999 ? la : ra<999 ? ra : sa(S,E,W)??160);
 
-  // Form checks
-  const wristBehind = ok(W,.22)&&ok(E,.22) && (W.x - E.x) > 0.12;
-  const flare    = ok(LE,.22)&&ok(LS,.22) && Math.abs(LE.x - LS.x) > 0.28;
-  // Close-grip form: elbow angle at bottom should be tight (< 90°). Not applicable mid-press.
-  const cgElbowLoose = cg && ea < 999 && ea > 95 && wristElev < 0.14;
-
   const s = repState[currentEx];
-  // BOTTOM: wrist near shoulder level — elbows back on floor / tucked
-  // Close-grip keeps elbows tighter so wrist never drops as low → use a looser threshold
-  const bottomThresh = cg ? 0.12 : 0.06;
-  if(wristElev < bottomThresh) tryEnterPhase(s,'down');
-  // TOP: wrist well above shoulder — arm extended
-  if(wristElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  if(cg){
+    // Close-grip: elbow angle is the reliable signal
+    if(ea < 95)  tryEnterPhase(s,'down');
+    if(ea > 155 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+  } else {
+    // Regular floor press: wrist elevation
+    if(wristElev < 0.06) tryEnterPhase(s,'down');
+    if(wristElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+  }
+
+  // Form checks (side-camera x-comparison is valid for elbows vs shoulder width)
+  const wristBehind = ok(W,.22)&&ok(E,.22) && (W.x - E.x) > 0.12;
+  const flare = !cg && ok(LE,.22)&&ok(LS,.22) && Math.abs(LE.x - LS.x) > 0.28;
 
   const issues=[]; let grade='A';
-  if(cgElbowLoose)              { issues.push({msg:'TUCK ELBOWS IN - CLOSE GRIP',           sev:'warn'}); grade='B'; }
-  else if(flare && !cg)        { issues.push({msg:'ELBOWS SLIGHTLY TOO WIDE - ANGLE IN', sev:'warn'}); grade='B'; }
-  if(wristBehind)              { issues.push({msg:'WRISTS FORWARD - KEEP ABOVE ELBOWS', sev:'warn'}); if(grade==='A')grade='B'; }
+  if(flare)       { issues.push({msg:'ELBOWS TOO WIDE - TUCK IN',         sev:'warn'}); grade='B'; }
+  if(wristBehind) { issues.push({msg:'WRISTS FORWARD - KEEP ABOVE ELBOWS',sev:'warn'}); if(grade==='A')grade='B'; }
 
   if(!issues.length){
-    if(wristElev < 0.06)       issues.push({msg:'ELBOWS ON FLOOR - DRIVE UP HARD!',     sev:'good'});
-    else if(wristElev < 0.12)  issues.push({msg:cg?'ELBOWS CLOSE - PRESS':'LOWER UNTIL ELBOWS TOUCH FLOOR', sev:'warn'});
-    else if(wristElev < 0.18)  issues.push({msg:'PRESSING UP - EXTEND FULLY',           sev:'warn'});
-    else                       issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL',   sev:'good'});
+    if(cg){
+      if(ea < 95)       issues.push({msg:'ELBOWS TUCKED - DRIVE UP HARD!',    sev:'good'});
+      else if(ea < 140) issues.push({msg:'PRESSING - KEEP ELBOWS IN TIGHT',   sev:'warn'});
+      else              issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL', sev:'good'});
+    } else {
+      if(wristElev < 0.06)      issues.push({msg:'ELBOWS ON FLOOR - DRIVE UP HARD!',    sev:'good'});
+      else if(wristElev < 0.12) issues.push({msg:'LOWER UNTIL ELBOWS TOUCH FLOOR',      sev:'warn'});
+      else if(wristElev < 0.18) issues.push({msg:'PRESSING UP - EXTEND FULLY',          sev:'warn'});
+      else                      issues.push({msg:'ARMS EXTENDED - LOWER WITH CONTROL',  sev:'good'});
+    }
   }
-  // Show wristElev*100 as the HUD metric (more meaningful than raw elbow angle here)
-  return {valid:true, a1:Math.round(wristElev*100), a2:null, issues, grade, reps:s.reps};
+
+  const a1 = cg ? ea : Math.round(wristElev*100);
+  return {valid:true, a1, a2:null, issues, grade, reps:s.reps};
 }
 
 function analyzeFloorFlye(lm){
@@ -811,10 +935,11 @@ function analyzeLunge(lm){
   if(ka<100) tryEnterPhase(s,'down');
   if(ka>155&&s.phase==='down'&&tryEnterPhase(s,'up'))countRep(s);
   const issues=[];let grade='A';
-  if(back>22){issues.push({msg:'CHEST UP - TORSO LEANING',sev:'warn'});grade='B'}
+  // back = lateral hip sway from FRONT camera — hip dropping sideways is a real lunge error
+  if(back>12){issues.push({msg:'KEEP HIPS LEVEL - STAY CENTERED',sev:'warn'});if(grade==='A')grade='B'}
   if(!issues.length){
     if(ka<90)issues.push({msg:'GOOD DEPTH - DRIVE BACK UP',sev:'good'})
-    else if(ka<150)issues.push({msg:'STEP BACK AND LUNGE',sev:'warn'})
+    else if(ka<150)issues.push({msg:'STEP BACK AND LUNGE DEEP',sev:'warn'})
     else issues.push({msg:'STANDING - STEP BACK',sev:'good'})
   }
   return{valid:true,a1:ka,a2:back,issues,grade,reps:s.reps}
@@ -957,20 +1082,39 @@ function analyzeShrug(lm){
 }
 
 function analyzeTricepKickback(lm){
-  const ta=torsoAngle(lm);
-  if(ta===null)return{valid:false,msg:'SIDE-ON TO CAMERA - HINGE FORWARD',grade:'?'};
-  const[S,E,W]=bestArm(lm);const ea=sa(S,E,W)??90;
-  const s=repState[currentEx];
-  if(ea>155) tryEnterPhase(s,'up');
-  if(ea<60&&s.phase==='up'&&tryEnterPhase(s,'down'))countRep(s);
-  const issues=[];let grade='A';
-  if(ta<28){issues.push({msg:'LEAN MORE FORWARD - TORSO PARALLEL',sev:'warn'});grade='B'}
+  // Camera: SIDE. Person hinges forward ~45°, upper arm parallel to floor.
+  //
+  // Rep signal: elbow angle (shoulder → elbow → wrist)
+  //   BOTTOM (forearm hanging down, elbow bent): ea ~80-100°
+  //   TOP    (arm fully extended, kickback done): ea ~155-175°
+  //
+  // Old bug: 'down' threshold was ea < 60 — a normal bent arm at rest sits at
+  // ~90° so the down phase was never entered and no reps could count.
+
+  const ta = torsoAngle(lm);
+  if(ta===null) return {valid:false, msg:'SIDE-ON TO CAMERA - HINGE FORWARD', grade:'?'};
+
+  const [S,E,W] = bestArm(lm);
+  if(!ok(S,.28)||!ok(E,.28)) return {valid:false, msg:'ARM NOT VISIBLE - ADJUST CAMERA', grade:'?'};
+
+  const ea = sa(S,E,W) ?? 90;
+  const s  = repState[currentEx];
+
+  // TOP: arm straight (kickback complete)
+  if(ea > 150) tryEnterPhase(s,'up');
+  // BOTTOM: arm bent back to ~90° resting position
+  if(ea < 105 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(ta < 22){ issues.push({msg:'LEAN FURTHER FORWARD - TORSO PARALLEL', sev:'warn'}); grade='B'; }
+
   if(!issues.length){
-    if(ea>155)issues.push({msg:'FULL EXTENSION - SQUEEZE TRICEP!',sev:'good'})
-    else if(ea<70)issues.push({msg:'ARM BENT - KICK BACK!',sev:'warn'})
-    else issues.push({msg:'EXTEND FULLY',sev:'warn'})
+    if(ea > 150)      issues.push({msg:'FULL EXTENSION - SQUEEZE TRICEP!',  sev:'good'});
+    else if(ea > 110) issues.push({msg:'KICK WRIST BACK - EXTEND FULLY!',   sev:'warn'});
+    else              issues.push({msg:'ARM BENT - KICK BACK!',             sev:'warn'});
   }
-  return{valid:true,a1:ea,a2:ta,issues,grade,reps:s.reps}
+
+  return {valid:true, a1:ea, a2:ta, issues, grade, reps:s.reps};
 }
 
 function analyzeCalfRaise(lm){
@@ -1018,6 +1162,156 @@ function analyzePosture(lm){
   return{valid:true,a1:back,a2:asym,issues,grade,reps:repState[currentEx].reps}
 }
 
+// ── EXTRAS: CORE & FOREARMS ──────────────────────────────────────────────────
+
+function analyzePlank(lm){
+  // Camera: SIDE. Timer-based hold — no rep counting.
+  // Tracks hip alignment vs shoulder-ankle line.
+  const [LS,RS,LH,RH,LA,RA] = [lm[11],lm[12],lm[23],lm[24],lm[27],lm[28]];
+  const sv = ok(LS,.28)?LS:ok(RS,.28)?RS:null;
+  if(!sv) return {valid:false, msg:'SIDE-ON TO CAMERA - FULL BODY VISIBLE', grade:'?'};
+  const hv = ok(LH,.28)?LH:ok(RH,.28)?RH:null;
+  const av = ok(LA,.28)?LA:ok(RA,.28)?RA:null;
+
+  // Elapsed hold seconds (shown in reps HUD)
+  const elapsed = GATE.state==='ACTIVE' && GATE.activatedAt
+    ? Math.round((Date.now()-GATE.activatedAt)/1000) : 0;
+
+  const issues=[]; let grade='A'; let bodyAlign=0;
+  if(hv && av){
+    // Expected hip y = interpolate along shoulder-ankle line
+    const expectedHipY = sv.y + (hv.x - sv.x)/(av.x - sv.x + 0.001) * (av.y - sv.y);
+    const hipDev = hv.y - expectedHipY; // positive = hips sagging, negative = piking
+    bodyAlign = Math.round(Math.abs(hipDev)*100);
+    if(hipDev > 0.06)  { issues.push({msg:'HIPS DROPPING - SQUEEZE CORE!',  sev:'bad'});  grade='C'; }
+    else if(hipDev < -0.06){ issues.push({msg:'LOWER HIPS - BODY STRAIGHT!', sev:'warn'}); grade='B'; }
+  }
+  if(!issues.length) issues.push({msg:'SOLID HOLD - BREATHE STEADY!', sev:'good'});
+
+  // Plank has no reps — return elapsed seconds as the display value
+  return {valid:true, a1:elapsed, a2:bodyAlign, issues, grade, reps:elapsed};
+}
+
+function analyzeCrunch(lm){
+  // Camera: SIDE. Person lying on back, knees bent.
+  // Signal: shoulder elevation above hip (H.y - S.y increases as shoulders rise).
+  const [LS,RS,LH,RH] = [lm[11],lm[12],lm[23],lm[24]];
+  const sv = ok(LS,.28)?LS:ok(RS,.28)?RS:null;
+  const hv = ok(LH,.28)?LH:ok(RH,.28)?RH:null;
+  if(!sv||!hv) return {valid:false, msg:'LIE DOWN - CAMERA FROM YOUR SIDE', grade:'?'};
+
+  const crunchElev = hv.y - sv.y; // positive = shoulders risen above hip line
+  const s = repState[currentEx];
+  if(crunchElev < 0.04) tryEnterPhase(s,'down');
+  if(crunchElev > 0.11 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(!issues.length){
+    if(crunchElev > 0.11)     issues.push({msg:'TOP - SQUEEZE ABS, HOLD A BEAT!', sev:'good'});
+    else if(crunchElev > 0.04)issues.push({msg:'CURL UP - CHIN TO CHEST',         sev:'warn'});
+    else                      issues.push({msg:'LOWER BACK DOWN - CONTROLLED',    sev:'good'});
+  }
+  return {valid:true, a1:Math.round(crunchElev*100), a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeLegRaise(lm){
+  // Camera: SIDE. Person lying flat.
+  // Signal: ankle elevation above hip (H.y - A.y increases as legs rise).
+  const [LH,RH,LA,RA] = [lm[23],lm[24],lm[27],lm[28]];
+  const hv = ok(LH,.28)?LH:ok(RH,.28)?RH:null;
+  const av = ok(LA,.28)?LA:ok(RA,.28)?RA:null;
+  if(!hv||!av) return {valid:false, msg:'LIE FLAT - CAMERA FROM YOUR SIDE', grade:'?'};
+
+  const legElev = hv.y - av.y; // positive = ankles above hip level
+  const s = repState[currentEx];
+  if(legElev < 0.05) tryEnterPhase(s,'down');
+  if(legElev > 0.18 && s.phase==='down' && tryEnterPhase(s,'up')) countRep(s);
+
+  const issues=[]; let grade='A';
+  if(!issues.length){
+    if(legElev > 0.18)      issues.push({msg:'LEGS HIGH - LOWER SLOW & CONTROLLED!', sev:'good'});
+    else if(legElev > 0.05) issues.push({msg:'RAISE LEGS - KEEP THEM STRAIGHT!',     sev:'warn'});
+    else                    issues.push({msg:'LEGS DOWN - RAISE WITHOUT SWINGING!',  sev:'good'});
+  }
+  return {valid:true, a1:Math.round(legElev*100), a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeMtnClimber(lm){
+  // Camera: SIDE. Plank position, knees alternate driving to chest.
+  // Signal: min knee angle across both legs — driven knee bends sharply.
+  const [LS,RS,LH,RH,LK,RK,LA,RA] = [lm[11],lm[12],lm[23],lm[24],lm[25],lm[26],lm[27],lm[28]];
+  const sv = ok(LS,.28)?LS:ok(RS,.28)?RS:null;
+  if(!sv) return {valid:false, msg:'SIDE-ON TO CAMERA - GET INTO PLANK', grade:'?'};
+
+  const lKA = (ok(LH,.25)&&ok(LK,.25)&&ok(LA,.25)) ? calcAngle(LH,LK,LA) : 180;
+  const rKA = (ok(RH,.25)&&ok(RK,.25)&&ok(RA,.25)) ? calcAngle(RH,RK,RA) : 180;
+  const kneeAng = Math.round(Math.min(lKA, rKA));
+
+  const s = repState[currentEx];
+  if(kneeAng < 100) tryEnterPhase(s,'up');   // knee driven to chest
+  if(kneeAng > 155 && s.phase==='up' && tryEnterPhase(s,'down')) countRep(s);
+
+  // Hip alignment check (same as plank)
+  const hv = ok(LH,.28)?LH:ok(RH,.28)?RH:null;
+  const av = ok(LA,.28)?LA:ok(RA,.28)?RA:null;
+  const issues=[]; let grade='A';
+  if(hv && av){
+    const hipDev = hv.y - (sv.y + (hv.x-sv.x)/(av.x-sv.x+0.001)*(av.y-sv.y));
+    if(hipDev > 0.08){ issues.push({msg:'HIPS UP - KEEP BODY LEVEL!', sev:'warn'}); grade='B'; }
+  }
+  if(!issues.length){
+    if(kneeAng < 100)      issues.push({msg:'KNEE IN - DRIVE THE OTHER LEG!', sev:'good'});
+    else if(kneeAng < 140) issues.push({msg:'DRIVE KNEE TO CHEST - FAST!',    sev:'warn'});
+    else                   issues.push({msg:'DRIVE KNEES ALTERNATING - GO!',  sev:'good'});
+  }
+  return {valid:true, a1:kneeAng, a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeRevCurl(lm){
+  // Camera: FRONT. Palms-down reverse curl — same elbow angle mechanics as hammer curl.
+  const [LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS)&&!ok(RS)) return {valid:false, msg:'FACE CAMERA - ARMS VISIBLE', grade:'?'};
+  const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
+  const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
+  const ea = Math.min(LA,RA)===999 ? null : Math.round(Math.min(LA,RA));
+  if(!ea) return {valid:false, msg:'ELBOW NOT VISIBLE - ADJUST', grade:'?'};
+  const lD=ok(LS)&&ok(LE)&&Math.abs(LE.x-LS.x)>0.18;
+  const rD=ok(RS)&&ok(RE)&&Math.abs(RE.x-RS.x)>0.18;
+  const s=repState[currentEx];
+  if(ea<60) tryEnterPhase(s,'up');
+  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down')) countRep(s);
+  const issues=[]; let grade='A';
+  if(lD||rD){ issues.push({msg:"ELBOWS IN - DON'T SWING", sev:'warn'}); grade='B'; }
+  if(!issues.length){
+    if(ea<60)       issues.push({msg:'PEAK - SQUEEZE FOREARMS!',        sev:'good'});
+    else if(ea<130) issues.push({msg:'CURL UP - PALMS STAY FACING DOWN', sev:'warn'});
+    else            issues.push({msg:'FULL EXTENSION - GREAT ROM',       sev:'good'});
+  }
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
+}
+
+function analyzeZottmanCurl(lm){
+  // Camera: FRONT. Supinate on the way up, pronate at top, lower palms-down.
+  // MoveNet can't track wrist rotation, so we track elbow angle + cue the rotation.
+  const [LS,RS,LE,RE,LW,RW]=[lm[11],lm[12],lm[13],lm[14],lm[15],lm[16]];
+  if(!ok(LS)&&!ok(RS)) return {valid:false, msg:'FACE CAMERA - ARMS VISIBLE', grade:'?'};
+  const LA=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):999;
+  const RA=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):999;
+  const ea = Math.min(LA,RA)===999 ? null : Math.round(Math.min(LA,RA));
+  if(!ea) return {valid:false, msg:'ELBOW NOT VISIBLE - ADJUST', grade:'?'};
+  const s=repState[currentEx];
+  if(ea<60) tryEnterPhase(s,'up');
+  if(ea>155&&s.phase==='up'&&tryEnterPhase(s,'down')) countRep(s);
+  const issues=[]; let grade='A';
+  if(!issues.length){
+    if(ea<60)       issues.push({msg:'TOP - ROTATE PALMS DOWN NOW!',         sev:'good'});
+    else if(ea<130) issues.push({msg:'CURLING UP - PALMS FACING YOU',         sev:'warn'});
+    else if(ea<155) issues.push({msg:'LOWERING - KEEP PALMS FACING DOWN',     sev:'warn'});
+    else            issues.push({msg:'BOTTOM - ROTATE PALMS UP TO CURL AGAIN',sev:'good'});
+  }
+  return {valid:true, a1:ea, a2:null, issues, grade, reps:s.reps};
+}
+
 // EXERCISE CONFIG MAP
 // u1/u2 = unit suffix for HUD display. '°' = degrees (default), '' = unitless score/ratio
 const EX_CFG={
@@ -1026,13 +1320,13 @@ const EX_CFG={
   pushup:       {fn:analyzePushup,                     a1:'ELBOW ANG',  a2:null},
   skull_crusher:{fn:analyzeSkullCrusher,               a1:'ELBOW ANG',  a2:null},
   ohd_tri_ext:  {fn:analyzeOHDTricepExt,              a1:'ELBOW ANG',  a2:'BACK DEG'},
-  bent_row:     {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG',  a2:'ELBOW ANG'},
-  single_row:   {fn:lm=>analyzeHinge(lm,'row'),        a1:'TORSO DEG',  a2:'ELBOW ANG'},
-  stiff_rdl:    {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
-  hammer_curl:  {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
-  conc_curl:    {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
+  bent_row:     {fn:analyzeBentRow,                     a1:'TORSO DEG',  a2:'ELBOW ANG'},
+  single_row:   {fn:analyzeSingleRow,                   a1:'TORSO DEG',  a2:'ELBOW ANG'},
+  stiff_rdl:    {fn:lm=>analyzeRDL(lm,'stiff'),         a1:'TORSO DEG',  a2:'KNEE ANG'},
+  hammer_curl:  {fn:analyzeCurl,                        a1:'ELBOW ANG',  a2:null},
+  conc_curl:    {fn:lm=>analyzeCurl(lm,{single:true}),  a1:'ELBOW ANG',  a2:null},
   goblet_sq:    {fn:lm=>analyzeSquat(lm,'goblet'),     a1:'KNEE ANG',   a2:'BACK DEG'},
-  rom_dl:       {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  rom_dl:       {fn:lm=>analyzeRDL(lm,'rdl'),          a1:'TORSO DEG',  a2:'KNEE ANG'},
   rev_lunge:    {fn:analyzeLunge,                      a1:'KNEE ANG',   a2:'TORSO DEG'},
   sumo_sq:      {fn:lm=>analyzeSquat(lm,'sumo'),       a1:'KNEE ANG',   a2:'BACK DEG'},
   calf_raise:   {fn:analyzeCalfRaise,                  a1:'BODY LEAN',  a2:null},
@@ -1044,13 +1338,20 @@ const EX_CFG={
   db_curl:      {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
   incline_curl: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
   hammer_curl2: {fn:analyzeCurl,                       a1:'ELBOW ANG',  a2:null},
-  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'WRIST ELEV', u1:'',  a2:null},
+  floor_cg:     {fn:lm=>analyzeFloorPress(lm,true),    a1:'ELBOW ANG',         a2:null},
   tri_kick:     {fn:analyzeTricepKickback,              a1:'ELBOW ANG',  a2:'TORSO DEG'},
   sq_press:     {fn:lm=>analyzeSquat(lm,'sqpress'),    a1:'KNEE ANG',   a2:'ELBOW ANG'},
-  deadlift:     {fn:lm=>analyzeHinge(lm,'rdl'),        a1:'TORSO DEG',  a2:null},
+  deadlift:     {fn:lm=>analyzeRDL(lm,'deadlift'),     a1:'TORSO DEG',  a2:'KNEE ANG'},
   push_press:   {fn:analyzeOHDPress,                   a1:'ELBOW ANG',  a2:'BACK DEG'},
   renegade_row: {fn:analyzeRenegadeRow,                 a1:'ELBOW ANG',  a2:null},
   farmers_carry:{fn:analyzePosture,                    a1:'BODY LEAN',  a2:'SHLDR ASYM', u2:''},
+  // Extras
+  plank:        {fn:analyzePlank,                       a1:'HOLD SECS',  u1:'s', a2:'ALIGNMENT', u2:''},
+  crunch:       {fn:analyzeCrunch,                      a1:'CRUNCH ELEV',u1:'',  a2:null},
+  leg_raise:    {fn:analyzeLegRaise,                    a1:'LEG ELEV',   u1:'',  a2:null},
+  mtn_climber:  {fn:analyzeMtnClimber,                  a1:'KNEE ANG',           a2:null},
+  rev_curl:     {fn:analyzeRevCurl,                     a1:'ELBOW ANG',          a2:null},
+  zottman_curl: {fn:analyzeZottmanCurl,                 a1:'ELBOW ANG',          a2:null},
 };
 
 // ════════════════════════════════════════════════
@@ -1062,6 +1363,7 @@ const GATE = {
   state: 'IDLE',      // 'IDLE' | 'POSITIONING' | 'COUNTDOWN' | 'ACTIVE'
   stableFrames: 0,    // consecutive frames body has been stable + in position
   countdownStart: 0,  // timestamp when countdown began
+  activatedAt: 0,     // timestamp when ACTIVE state began (used by plank timer)
   posHistory: [],     // rolling shoulder-midpoint positions for stability check
   STABLE_NEEDED: 45,  // ~1.5s at 30fps (Option C — stability gate)
   CD_MS: 3000,        // 3 second countdown (Option A)
@@ -1071,6 +1373,7 @@ function resetGate(){
   GATE.state = 'IDLE';
   GATE.stableFrames = 0;
   GATE.countdownStart = 0;
+  GATE.activatedAt = 0;
   GATE.posHistory = [];
   const ov = document.getElementById('gate-overlay');
   ov.style.display = 'none';
@@ -1100,14 +1403,25 @@ function readyCheck(id, lm){
   const [LH,RH,LK,RK,LA,RA] = [lm[23],lm[24],lm[25],lm[26],lm[27],lm[28]];
 
   // Floor exercises — just need body visible, can't check lying posture
-  const FLOOR = new Set(['floor_press','floor_flye','pushup','skull_crusher','floor_cg','renegade_row','incline_curl']);
+  const FLOOR = new Set(['floor_press','floor_flye','pushup','skull_crusher','floor_cg','renegade_row','incline_curl','plank','crunch','leg_raise','mtn_climber']);
   if(FLOOR.has(id)){
     if(!ok(LS,.28)&&!ok(RS,.28)) return {pass:false,hint:'CAMERA MUST SEE YOUR UPPER BODY'};
     return {pass:true, hint:'POSITION DETECTED — HOLD STILL'};
   }
 
+  // Single-arm row: start already bent over with arm hanging (torso ~70-90°)
+  if(id==='single_row'){
+    const ta=torsoAngle(lm);
+    if(ta===null) return {pass:false, hint:'STAND SIDEWAYS - LEAN ON BENCH'};
+    if(ta < 40) return {pass:false, hint:'LEAN FORWARD - TORSO PARALLEL TO FLOOR'};
+    const [S,E,W]=bestArm(lm);
+    const armAng=sa(S,E,W)??0;
+    if(armAng < 130) return {pass:false, hint:'LET ARM HANG - EXTEND FULLY DOWN'};
+    return {pass:true, hint:'BENT-OVER POSITION CONFIRMED'};
+  }
+
   // Hinge/side-camera exercises — standing upright to start
-  const HINGE = new Set(['bent_row','single_row','stiff_rdl','rom_dl','deadlift','tri_kick','front_raise','calf_raise']);
+  const HINGE = new Set(['bent_row','stiff_rdl','rom_dl','deadlift','tri_kick','front_raise','calf_raise']);
   if(HINGE.has(id)){
     const ta=torsoAngle(lm);
     if(ta===null) return {pass:false, hint:'STAND SIDEWAYS TO CAMERA'};
@@ -1139,13 +1453,20 @@ function readyCheck(id, lm){
     }
   }
 
-  // Curl family: arms must be hanging down (not pre-curled)
-  const CURL = new Set(['db_curl','hammer_curl','hammer_curl2','conc_curl']);
-  if(CURL.has(id)){
+  // Curl family — two flavours:
+  //   two-arm curls: BOTH arms must be hanging down (not pre-curled)
+  //   single-arm curl (conc): ONE arm must be hanging (working arm),
+  //                            the other rests bent on lap/side
+  const TWO_ARM_CURL    = new Set(['db_curl','hammer_curl','hammer_curl2','rev_curl','zottman_curl']);
+  const SINGLE_ARM_CURL = new Set(['conc_curl']);
+  if(TWO_ARM_CURL.has(id) || SINGLE_ARM_CURL.has(id)){
     const la=(ok(LS)&&ok(LE)&&ok(LW))?calcAngle(LS,LE,LW):180;
     const ra=(ok(RS)&&ok(RE)&&ok(RW))?calcAngle(RS,RE,RW):180;
-    const minA=Math.min(la,ra);
-    if(minA<140) return {pass:false, hint:'STRAIGHTEN ARMS — HANG THEM DOWN'};
+    if(TWO_ARM_CURL.has(id)){
+      if(Math.min(la,ra) < 140) return {pass:false, hint:'STRAIGHTEN BOTH ARMS — HANG THEM DOWN'};
+    } else {
+      if(Math.max(la,ra) < 140) return {pass:false, hint:'EXTEND WORKING ARM DOWN'};
+    }
   }
 
   return {pass:true, hint:'POSITION CONFIRMED — HOLD STILL'};
@@ -1258,6 +1579,7 @@ function runGate(lm){
     if(remaining<=0){
       // GO!
       GATE.state='ACTIVE';
+      GATE.activatedAt=Date.now();
       ov.style.display='none';
       if(voiceOn){
         window.speechSynthesis.cancel();
@@ -1279,8 +1601,8 @@ function runGate(lm){
 // If body posture doesn't match selected exercise → block counting + warn.
 // ════════════════════════════════════════════════
 
-const FLOOR_EX    = new Set(['floor_press','floor_flye','skull_crusher','floor_cg','pushup','renegade_row','incline_curl']);
-const STANDING_EX = new Set(['db_curl','hammer_curl','hammer_curl2','conc_curl','ohd_press','ohd_tri_ext','lat_raise','upright_row','shrug','goblet_sq','sumo_sq','rev_lunge','sq_press','push_press','farmers_carry','calf_raise','front_raise']);
+const FLOOR_EX    = new Set(['floor_press','floor_flye','skull_crusher','floor_cg','pushup','renegade_row','incline_curl','plank','crunch','leg_raise','mtn_climber']);
+const STANDING_EX = new Set(['db_curl','hammer_curl','hammer_curl2','conc_curl','ohd_press','ohd_tri_ext','lat_raise','upright_row','shrug','goblet_sq','sumo_sq','rev_lunge','sq_press','push_press','farmers_carry','calf_raise','front_raise','rev_curl','zottman_curl']);
 const HINGE_EX    = new Set(['bent_row','single_row','stiff_rdl','rom_dl','deadlift','tri_kick']);
 
 // Smoothed standing check — require 8 consecutive frames to avoid flickering warnings
@@ -1559,8 +1881,10 @@ function onResults(results){
   const sqFamily=['goblet_sq','sumo_sq','sq_press','rev_lunge'];
   if(['pushup','floor_press','floor_flye','skull_crusher','ohd_tri_ext','ohd_press','push_press','floor_cg'].includes(currentEx))
     drawTag([13,14],r.a1,'°',r.a1<80?'good':r.a1<140?'warn':'good');
-  else if(['db_curl','hammer_curl','hammer_curl2','conc_curl','incline_curl','tri_kick','renegade_row'].includes(currentEx))
+  else if(['db_curl','hammer_curl','hammer_curl2','conc_curl','incline_curl','tri_kick','renegade_row','rev_curl','zottman_curl'].includes(currentEx))
     drawTag([13,14],r.a1,'°',r.a1<60?'good':r.a1<130?'warn':'good');
+  else if(currentEx==='mtn_climber')
+    drawTag([25,26],r.a1,'°',r.a1<100?'good':r.a1<140?'warn':'good');
   else if(['bent_row','single_row','stiff_rdl','rom_dl','deadlift'].includes(currentEx))
     drawTag([23,24],r.a1,'°',r.a1>70?'bad':r.a1>35?'warn':'good');
   else if(sqFamily.includes(currentEx)||currentEx==='goblet_sq')
